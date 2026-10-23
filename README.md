@@ -30,7 +30,7 @@ build 5 增加画面横向拖动调节进度：右滑快进、左滑后退，滑
 
 ## 构建与验证
 
-IPA：GitHub Actions 使用 macOS、Xcode 26.6、XcodeGen、CocoaPods 与 MobileVLCKit 3.7.2，关闭签名后将 `.app` 放入 `Payload` 打包。运行原生单元测试和 UI 测试，测试素材为合成画面。
+IPA：GitHub Actions 使用 macOS、Xcode 26.6、XcodeGen、CocoaPods 与 MobileVLCKit 3.7.2，关闭签名后将 `.app` 放入 `Payload` 打包。运行原生单元测试和 UI 测试，测试素材为合成画面。自动隐藏/点击显隐用专门测试验证真实计时；其他操作测试通过仅 Debug 可用的参数固定显示控制栏，避免慢速模拟器的快照延迟打断点击。正式 IPA 不含该参数。
 
 Windows 10/11：Python 3.9+，安装 `server/requirements-desktop.txt`，运行 `python -m PyInstaller --noconfirm LanCinema-PC.spec`。独立 EXE 内含 Python、Qt、二维码、Bonjour 与 FFmpeg，不要求使用者另装 Python。
 
