@@ -1,0 +1,103 @@
+name: Build unsigned IPA
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          brew install xcodegen
+          if ! command -v pod >/dev/null; then gem install cocoapods --no-document; fi
+          xcodebuild -version
+      - name: Generate project and install VLC
+        run: |
+          xcodegen generate
+          pod install
+      - name: Build for iPhone without signing
+        run: |
+          set -o pipefail
+          xcodebuild -workspace LanCinema.xcworkspace -scheme LanCinema \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' ARCHS=arm64 ONLY_ACTIVE_ARCH=NO build | tee build.log
+      - name: Package and verify IPA
+        run: |
+          mkdir -p package/Payload
+          cp -R build/Build/Products/Release-iphoneos/LanCinema.app package/Payload/
+          test -x package/Payload/LanCinema.app/LanCinema
+          file package/Payload/LanCinema.app/LanCinema | grep arm64
+          plutil -lint package/Payload/LanCinema.app/Info.plist
+          cd package
+          zip -qry ../LanCinema-unsigned.ipa Payload
+          cd ..
+          shasum -a 256 LanCinema-unsigned.ipa > SHA256.txt
+          unzip -t LanCinema-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LanCinema-unsigned
+          path: |
+            LanCinema-unsigned.ipa
+            SHA256.txt
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: build-log
+          path: build.log
+  ui-tests:
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          brew install xcodegen
+          if ! command -v pod >/dev/null; then gem install cocoapods --no-document; fi
+          xcodegen generate
+          pod install
+      - name: Run server checks
+        run: |
+          python3 -m pip install --break-system-packages imageio-ffmpeg
+          cd server && python3 -m unittest -v test_server.py test_video_probe.py test_playback_cache.py
+      - name: Test native UI in simulator
+        run: |
+          python3 server/ui_fixture_server.py > /tmp/lancinema-fixture.log 2>&1 &
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import sys,json; d=json.load(sys.stdin); pairs=[(k,x) for k,xs in d["devices"].items() for x in xs if x["name"] == "iPhone 17 Pro"]; pairs.sort(key=lambda p: tuple(int(n) for n in p[0].split("iOS-")[-1].split("-")), reverse=True); print(pairs[0][1]["udid"])')
+          xcrun simctl boot "$DEVICE"
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcrun simctl ui "$DEVICE" appearance light
+          set -o pipefail
+          xcodebuild -workspace LanCinema.xcworkspace -scheme LanCinema \
+            -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" \
+            -parallel-testing-enabled NO -resultBundlePath UITestResults.xcresult CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- test | tee ui-test.log
+          xcrun simctl ui "$DEVICE" appearance dark
+          xcrun simctl terminate "$DEVICE" local.bixer.LanCinema || true
+          xcrun simctl launch "$DEVICE" local.bixer.LanCinema --ui-test
+          sleep 3
+          mkdir -p screenshots
+          xcrun simctl io "$DEVICE" screenshot screenshots/library-dark.png
+          xcrun simctl ui "$DEVICE" content_size accessibility-extra-extra-extra-large
+          xcrun simctl io "$DEVICE" screenshot screenshots/library-large-text.png
+      - name: Export native captures
+        if: always()
+        run: |
+          mkdir -p screenshots
+          if [ -d UITestResults.xcresult ]; then
+            xcrun xcresulttool export attachments --path UITestResults.xcresult --output-path screenshots || true
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-ui-validation
+          path: |
+            screenshots/
+            ui-test.log
