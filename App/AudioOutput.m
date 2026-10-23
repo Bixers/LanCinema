@@ -30,7 +30,7 @@ extern int64_t libvlc_clock(void);
 @property(nonatomic) uint64_t probeLast;
 @property(nonatomic) uint64_t probeLongest;
 #endif
-- (void)enqueue:(const float *)samples count:(unsigned)count pts:(int64_t)pts;
+- (void)enqueue:(const int16_t *)samples count:(unsigned)count pts:(int64_t)pts;
 - (void)setOutputPaused:(BOOL)paused;
 - (void)flush;
 @end
@@ -55,18 +55,19 @@ static void LCFlush(void *opaque, int64_t pts) { [(__bridge LCAudioOutput *)opaq
     NSError *error;
     if (![_engine startAndReturnError:&error]) return nil;
     libvlc_audio_set_callbacks(player.libVLCMediaPlayer, LCPlay, LCPause, LCResume, LCFlush, NULL, (__bridge void *)self);
-    libvlc_audio_set_format(player.libVLCMediaPlayer, "FL32", 48000, 2);
+    // VLC 3's amem output supports native signed 16-bit samples only.
+    libvlc_audio_set_format(player.libVLCMediaPlayer, "S16N", 48000, 2);
     return self;
 }
-- (void)enqueue:(const float *)samples count:(unsigned)count pts:(int64_t)pts {
-    // libvlc's interleaved float buffer is valid only during this callback.
+- (void)enqueue:(const int16_t *)samples count:(unsigned)count pts:(int64_t)pts {
+    // libvlc's interleaved S16 buffer is valid only during this callback.
     if (!samples || count == 0) return;
     AVAudioPCMBuffer *buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:self.format frameCapacity:count];
     if (!buffer) return;
     buffer.frameLength = count;
     for (unsigned i = 0; i < count; i++) {
-        buffer.floatChannelData[0][i] = samples[i*2];
-        buffer.floatChannelData[1][i] = samples[i*2+1];
+        buffer.floatChannelData[0][i] = samples[i*2] / 32768.0f;
+        buffer.floatChannelData[1][i] = samples[i*2+1] / 32768.0f;
     }
     dispatch_sync(self.queue, ^{
         if (self.closed) return;
