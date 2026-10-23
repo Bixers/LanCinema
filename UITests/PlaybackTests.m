@@ -18,8 +18,12 @@
     [self addAttachment:a];
 }
 - (void)showPlayerControls {
-    if (!self.app.buttons[@"关闭播放器"].isHittable)
-        [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)] tap];
+    XCUICoordinate *center = [self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)];
+    XCUIElement *close = self.app.buttons[@"关闭播放器"];
+    // Reveal afresh so the next action gets the full four-second window.
+    // Merely checking hittability can succeed just before the hide timer fires.
+    if (close.exists && close.isHittable) [center tap];
+    [center tap];
 }
 - (void)closePlayback {
     [self showPlayerControls];
@@ -120,10 +124,9 @@
     XCTAssertTrue([folder waitForExistenceWithTimeout:20]);
     [folder tap];
     [self.app.staticTexts[@"时间戳偏移测试.ts"] tap];
-    [self expectationForPredicate:[NSPredicate predicateWithFormat:@"exists == YES AND enabled == YES"] evaluatedWithObject:self.app.sliders[@"播放进度"] handler:nil];
-    [self waitForExpectationsWithTimeout:25 handler:nil];
     [self waitForPlaybackSecondsFrom:1 to:50];
     [self showPlayerControls];
+    XCTAssertTrue(self.app.sliders[@"播放进度"].enabled);
 }
 - (void)testControlsAutoHideAndTapToggle {
     [self openTransportStream];
@@ -199,15 +202,15 @@
     XCTAssertTrue([movie waitForExistenceWithTimeout:10]);
     [movie tap];
     XCUIElement *slider = self.app.sliders[@"播放进度"];
-    [self expectationForPredicate:[NSPredicate predicateWithFormat:@"exists == YES AND enabled == YES"] evaluatedWithObject:slider handler:nil];
-    [self waitForExpectationsWithTimeout:25 handler:nil];
-    NSString *duration = [self.app.staticTexts[@"playbackTime"].label componentsSeparatedByString:@" / "].lastObject;
+    [self waitForPlaybackSecondsFrom:1 to:50];
+    NSString *duration = [self.app.otherElements[@"playerGestureSurface"].value componentsSeparatedByString:@" / "].lastObject;
     XCTAssertTrue(([@[@"00:59", @"01:00", @"01:01"] containsObject:duration]), @"Unexpected TS duration: %@", duration);
-    if (!slider.isHittable) [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)] tap];
+    [self showPlayerControls];
+    XCTAssertTrue(slider.enabled);
     [slider adjustToNormalizedSliderPosition:.65];
     [self waitForPlaybackSecondsFrom:36 to:45];
     [self assertVideoFramesAdvance:@"ts-seek-forward"];
-    if (!slider.isHittable) [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)] tap];
+    [self showPlayerControls];
     [slider adjustToNormalizedSliderPosition:.2];
     [self waitForPlaybackSecondsFrom:10 to:17];
     [self assertVideoFramesAdvance:@"ts-seek-backward"];
@@ -218,7 +221,8 @@
     [movie tap];
     [self waitForPlaybackSecondsFrom:16 to:40];
     [self assertVideoFramesAdvance:@"ts-resume"];
-    if (!self.app.buttons[@"字幕和音轨"].isHittable) [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)] tap];
+    [self showPlayerControls];
+    [self.app.buttons[@"暂停"] tap];
     [self.app.buttons[@"字幕和音轨"] tap];
     [self.app.buttons[@"从头重新播放"] tap];
     [self waitForPlaybackSecondsFrom:0 to:8];
