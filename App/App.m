@@ -1053,6 +1053,13 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     nav.navigationBar.prefersLargeTitles = YES;
     nav.view.tintColor = UIColor.systemTealColor;
     self.window.rootViewController = nav;
+#if DEBUG
+    NSArray *arguments = NSProcessInfo.processInfo.arguments;
+    if ([arguments containsObject:@"--ui-test-dark"]) self.window.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    if ([arguments containsObject:@"--ui-test-large"]) {
+        if (@available(iOS 17.0, *)) nav.traitOverrides.preferredContentSizeCategory = UIContentSizeCategoryAccessibilityExtraExtraExtraLarge;
+    }
+#endif
     [self.window makeKeyAndVisible];
 }
 @end

@@ -49,6 +49,15 @@
     [self.app launch];
     XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
     XCTAssertEqualObjects(self.app.buttons[@"排序"].value, @"修改时间 · 最新在前");
+    [self.app terminate];
+    self.app.launchArguments = @[@"--ui-test-dark", @"--ui-test-large"];
+    [self.app launch];
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    [self.app.staticTexts[@"演示文件夹"] tap];
+    [self capture:@"sorting-dark-large-list"];
+    [self.app.buttons[@"排序"] tap];
+    [self capture:@"sorting-dark-large-menu"];
+    XCTAssertTrue(self.app.buttons[@"修改时间"].exists);
 }
 - (NSData *)videoPixels {
     CGImageRef image = self.app.screenshot.image.CGImage;
