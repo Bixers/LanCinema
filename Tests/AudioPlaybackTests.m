@@ -1,5 +1,6 @@
 #import <XCTest/XCTest.h>
 #import <UIKit/UIKit.h>
+#import <AVFoundation/AVFoundation.h>
 #import <MobileVLCKit/MobileVLCKit.h>
 #import "../App/Connection.h"
 #import "../App/AudioOutput.h"
@@ -13,6 +14,7 @@
 - (void)togglePlay;
 - (void)applyPlaybackRate;
 - (void)stopPlayer;
+- (void)audioInterrupted:(NSNotification *)note;
 @end
 
 @interface AudioPlaybackTests : XCTestCase
@@ -106,6 +108,16 @@
     [player setValue:@2 forKey:@"selectedRate"];
     [player applyPlaybackRate]; [player.audioOutput beginRenderProbe];
     double speed = [self checkSound:player label:@"double-speed"];
+    NSNotification *began = [NSNotification notificationWithName:AVAudioSessionInterruptionNotification object:nil userInfo:@{AVAudioSessionInterruptionTypeKey:@(AVAudioSessionInterruptionTypeBegan)}];
+    NSNotification *ended = [NSNotification notificationWithName:AVAudioSessionInterruptionNotification object:nil userInfo:@{AVAudioSessionInterruptionTypeKey:@(AVAudioSessionInterruptionTypeEnded), AVAudioSessionInterruptionOptionKey:@(AVAudioSessionInterruptionOptionShouldResume)}];
+    [player audioInterrupted:began]; [self advanceRunLoop:.3];
+    XCTAssertFalse(player.player.isPlaying);
+    [player.audioOutput beginRenderProbe]; [player audioInterrupted:ended];
+    [self checkSound:player label:@"interruption"];
+    [player togglePlay]; [self advanceRunLoop:.3];
+    [player audioInterrupted:began]; [player audioInterrupted:ended];
+    [self advanceRunLoop:.3];
+    XCTAssertFalse(player.player.isPlaying, @"An interruption must not undo the user's pause");
     [self close:player];
     PlayerController *resumed = [self openAt:23];
     double resume = [self checkSound:resumed label:@"resume"];

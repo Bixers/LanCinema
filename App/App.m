@@ -87,6 +87,8 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 @property(nonatomic) BOOL closed;
 @property(nonatomic) BOOL controlsVisible;
 @property(nonatomic) BOOL resumeAfterBackground;
+@property(nonatomic) BOOL resumeAfterInterruption;
+@property(nonatomic) BOOL audioInterruptionActive;
 @property(nonatomic) NSTimeInterval controlsTouched;
 @property(nonatomic) NSInteger ticks;
 @end
@@ -517,6 +519,8 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 - (void)togglePlay {
     [self endBoost];
     self.controlsTouched = NSDate.timeIntervalSinceReferenceDate;
+    if (self.audioInterruptionActive) { self.resumeAfterInterruption = !self.resumeAfterInterruption; return; }
+    self.resumeAfterInterruption = NO;
     if ([self isTransportStream] && !self.prepared) {
         if (!self.preparing) [self prepareTransportStream];
         return;
@@ -672,6 +676,9 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     [self presentViewController:sheet animated:YES completion:nil];
 }
 - (void)background {
+#if DEBUG
+    NSLog(@"PLAYBACK_LIFECYCLE inactive state=%ld playing=%d", (long)self.player.state, self.player.isPlaying);
+#endif
     [self cancelPanSeek];
     [self scrubCancel];
     [self endBoost];
@@ -680,14 +687,39 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     if (self.player.isPlaying) [self.player pause];
 }
 - (void)active {
-    if (self.resumeAfterBackground && !self.closed) { [self.player play]; [self applyPlaybackRate]; }
+#if DEBUG
+    NSLog(@"PLAYBACK_LIFECYCLE active pending=%d interrupted=%d", self.resumeAfterBackground, self.audioInterruptionActive);
+#endif
+    if (self.resumeAfterBackground && !self.audioInterruptionActive && !self.closed) { [self.player play]; [self applyPlaybackRate]; }
+    if (self.audioInterruptionActive) return;
     self.resumeAfterBackground = NO;
 }
 - (void)audioInterrupted:(NSNotification *)note {
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self audioInterrupted:note]; });
+        return;
+    }
+    if (self.closed) return;
+#if DEBUG
+    NSLog(@"PLAYBACK_LIFECYCLE interruption type=%@ options=%@ state=%ld", note.userInfo[AVAudioSessionInterruptionTypeKey], note.userInfo[AVAudioSessionInterruptionOptionKey], (long)self.player.state);
+#endif
     if ([note.userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue] == AVAudioSessionInterruptionTypeBegan) {
+        if (!self.audioInterruptionActive) self.resumeAfterInterruption = self.player.isPlaying || self.resumeAfterBackground || self.player.state == VLCMediaPlayerStateOpening || self.player.state == VLCMediaPlayerStateBuffering;
+        self.audioInterruptionActive = YES;
         [self endBoost];
         [self.player pause];
         self.resumeAfterBackground = NO;
+    } else {
+        BOOL resume = self.resumeAfterInterruption && ([note.userInfo[AVAudioSessionInterruptionOptionKey] unsignedIntegerValue] & AVAudioSessionInterruptionOptionShouldResume);
+        self.audioInterruptionActive = NO;
+        self.resumeAfterInterruption = NO;
+        if (resume) {
+            if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive) {
+                [AVAudioSession.sharedInstance setActive:YES error:nil];
+                [self.player play];
+                [self applyPlaybackRate];
+            } else self.resumeAfterBackground = YES;
+        }
     }
 }
 - (void)closePlayer {
