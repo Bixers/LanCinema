@@ -111,6 +111,11 @@
     [self waitForExpectationsWithTimeout:15 handler:nil];
     NSLog(@"Playback time verified: %@ (expected %.0f–%.0f seconds)", time.value, minimum, maximum);
 }
+- (double)displayedPlaybackSeconds {
+    NSArray *parts = [[self.app.otherElements[@"playerGestureSurface"].value componentsSeparatedByString:@" / "].firstObject componentsSeparatedByString:@":"];
+    XCTAssertEqual(parts.count, 2);
+    return [parts[0] doubleValue] * 60 + [parts[1] doubleValue];
+}
 - (void)waitForControlsVisible:(BOOL)visible {
     XCUIElement *close = self.app.buttons[@"关闭播放器"];
     NSPredicate *visibility = [NSPredicate predicateWithBlock:^BOOL(XCUIElement *element, NSDictionary *bindings) {
@@ -158,22 +163,25 @@
     [self openTransportStream];
     [self.app.buttons[@"暂停"] tap];
     [self.app.sliders[@"播放进度"] adjustToNormalizedSliderPosition:.3];
-    [self waitForPlaybackSecondsFrom:17 to:20];
+    // XCTest's synthesized slider drag can land a few points from its nominal
+    // fraction. Measure the settled anchor, then verify canvas seek deltas.
+    [self waitForPlaybackSecondsFrom:15 to:22];
+    double anchor = [self displayedPlaybackSeconds];
     XCUICoordinate *left = [self.app coordinateWithNormalizedOffset:CGVectorMake(.25,.5)];
     XCUICoordinate *right = [self.app coordinateWithNormalizedOffset:CGVectorMake(.75,.5)];
     [left pressForDuration:.05 thenDragToCoordinate:right];
-    [self waitForPlaybackSecondsFrom:31 to:35];
+    [self waitForPlaybackSecondsFrom:anchor+13 to:anchor+17];
     XCTAssertTrue(self.app.buttons[@"播放"].exists);
     XCTAssertFalse(self.app.staticTexts[@"seekPreview"].exists);
     [self capture:@"canvas-seek-forward"];
     [right pressForDuration:.05 thenDragToCoordinate:left];
-    [self waitForPlaybackSecondsFrom:17 to:20];
+    [self waitForPlaybackSecondsFrom:anchor-2 to:anchor+2];
     [self capture:@"canvas-seek-backward"];
     // Vertical movement must not become a seek or a tap.
     XCUICoordinate *lower = [self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.65)];
     XCUICoordinate *upper = [self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.35)];
     [lower pressForDuration:.05 thenDragToCoordinate:upper];
-    [self waitForPlaybackSecondsFrom:17 to:20];
+    [self waitForPlaybackSecondsFrom:anchor-2 to:anchor+2];
     XCUICoordinate *center = [self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)];
     [center tap];
     [self waitForControlsVisible:NO];
@@ -181,10 +189,10 @@
     [self waitForControlsVisible:NO];
     [center tap];
     [self waitForControlsVisible:YES];
-    [self waitForPlaybackSecondsFrom:31 to:35];
+    [self waitForPlaybackSecondsFrom:anchor+13 to:anchor+17];
     // The next long press still restores speed and does not toggle controls.
     [self.app.buttons[@"播放"] tap];
-    [self waitForPlaybackSecondsFrom:34 to:42];
+    [self waitForPlaybackSecondsFrom:anchor+16 to:anchor+24];
     [self assertVideoFramesAdvance:@"canvas-seek-video-moving"];
     if (!self.app.buttons[@"播放倍速"].isHittable) [center tap];
     [center pressForDuration:1];
