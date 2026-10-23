@@ -595,7 +595,13 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     self.playButton.accessibilityLabel = self.player.isPlaying ? @"暂停" : @"播放";
     self.playButton.accessibilityValue = self.player.isPlaying ? @"playing" : @"paused";
     self.rateButton.accessibilityValue = [NSString stringWithFormat:@"%g×", self.player.rate];
-    if (self.controlsVisible && self.player.isPlaying && !self.scrubbing && !self.panning && !self.boosting && !self.presentedViewController && !UIAccessibilityIsVoiceOverRunning() && NSDate.timeIntervalSinceReferenceDate - self.controlsTouched > 4) [self setPlaybackControlsVisible:NO];
+    BOOL automaticHideEnabled = YES;
+#if DEBUG
+    // The dedicated hide/tap UI test uses the real timer. Other automation
+    // tests isolate their interactions from slow simulator snapshot latency.
+    automaticHideEnabled = ![NSProcessInfo.processInfo.arguments containsObject:@"--ui-test-keep-controls"];
+#endif
+    if (automaticHideEnabled && self.controlsVisible && self.player.isPlaying && !self.scrubbing && !self.panning && !self.boosting && !self.presentedViewController && !UIAccessibilityIsVoiceOverRunning() && NSDate.timeIntervalSinceReferenceDate - self.controlsTouched > 4) [self setPlaybackControlsVisible:NO];
     if (++self.ticks % 20 == 0) [self saveProgress];
 }
 - (void)mediaPlayerStateChanged:(NSNotification *)notification {

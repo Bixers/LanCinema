@@ -7,9 +7,15 @@
 @implementation PlaybackTests
 - (void)setUp {
     self.continueAfterFailure = NO;
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationPortrait;
     self.app = [XCUIApplication new];
-    self.app.launchArguments = @[@"--ui-test"];
+    self.app.launchArguments = [self.name containsString:@"testControlsAutoHideAndTapToggle"] ? @[@"--ui-test"] : @[@"--ui-test", @"--ui-test-keep-controls"];
     [self.app launch];
+}
+- (void)tearDown {
+    // A failed landscape assertion must not rotate later portrait-only checks.
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationPortrait;
+    [super tearDown];
 }
 - (void)capture:(NSString *)name {
     XCTAttachment *a = [XCTAttachment attachmentWithScreenshot:self.app.screenshot];
@@ -20,10 +26,7 @@
 - (void)showPlayerControls {
     XCUICoordinate *center = [self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)];
     XCUIElement *close = self.app.buttons[@"关闭播放器"];
-    // Reveal afresh so the next action gets the full four-second window.
-    // Merely checking hittability can succeed just before the hide timer fires.
-    if (close.exists && close.isHittable) [center tap];
-    [center tap];
+    if (!close.exists || !close.isHittable) [center tap];
 }
 - (void)closePlayback {
     [self showPlayerControls];
@@ -270,8 +273,8 @@
     XCTAssertTrue([self.app.staticTexts[@"已暂停"] waitForExistenceWithTimeout:5]);
     [[XCUIDevice sharedDevice] setOrientation:UIDeviceOrientationLandscapeLeft];
     XCTestExpectation *settled = [self expectationWithDescription:@"Native rotation settled"];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [settled fulfill]; });
-    [self waitForExpectationsWithTimeout:3 handler:nil];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3*NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [settled fulfill]; });
+    [self waitForExpectationsWithTimeout:5 handler:nil];
     // XCTest reports the application frame in the device's portrait coordinate space.
     // Verify the actual orientation and reachability of both top and bottom controls.
     XCTAssertEqual(XCUIDevice.sharedDevice.orientation, UIDeviceOrientationLandscapeLeft);
