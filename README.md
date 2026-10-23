@@ -32,6 +32,8 @@ build 5 增加画面横向拖动调节进度：右滑快进、左滑后退，滑
 
 IPA：GitHub Actions 使用 macOS、Xcode 26.6、XcodeGen、CocoaPods 与 MobileVLCKit 3.7.2，关闭签名后将 `.app` 放入 `Payload` 打包。运行原生单元测试和 UI 测试，测试素材为合成画面。自动隐藏/点击显隐用专门测试验证真实计时；其他操作测试通过仅 Debug 可用的参数固定显示控制栏，避免慢速模拟器的快照延迟打断点击。正式 IPA 不含该参数。
 
+1.3.0 / build 10 已通过 [公开构建与回归](https://github.com/Bixers/LanCinema/actions/runs/39903804666)：iPhone 17 Pro / iOS 26.5 模拟器 9 项界面测试及 8 项音频、连接、排序测试；macOS 服务端 23 项检查通过。本地 Windows 检查 27 项通过、1 项因符号链接权限跳过。合成音频打开约 0.40 秒、前后跳转约 0.20–0.30 秒恢复非静音混音输出；真机、蓝牙及长时间音画同步仍需验证。
+
 Windows 10/11：Python 3.9+，安装 `server/requirements-desktop.txt`，运行 `python -m PyInstaller --noconfirm LanCinema-PC.spec`。独立 EXE 内含 Python、Qt、二维码、Bonjour 与 FFmpeg，不要求使用者另装 Python。
 
 测试：`cd server` 后运行 `python -m unittest -v test_server.py test_video_probe.py test_playback_cache.py`；Windows 另运行 `test_desktop.py`。
