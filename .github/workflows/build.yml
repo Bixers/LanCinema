@@ -142,5 +142,7 @@ jobs:
         with:
           name: native-ui-validation
           path: |
-            screenshots/
+            screenshots/*.png
+            screenshots/*.txt
+            screenshots/manifest.json
             ui-test.log

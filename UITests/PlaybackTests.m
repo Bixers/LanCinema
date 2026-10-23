@@ -17,6 +17,16 @@
     a.lifetime = XCTAttachmentLifetimeKeepAlways;
     [self addAttachment:a];
 }
+- (void)showPlayerControls {
+    if (!self.app.buttons[@"关闭播放器"].isHittable)
+        [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)] tap];
+}
+- (void)closePlayback {
+    [self showPlayerControls];
+    // Freeze the hide timer before the slower XCTest snapshot/tap sequence.
+    if (self.app.buttons[@"暂停"].isHittable) [self.app.buttons[@"暂停"] tap];
+    [self.app.buttons[@"关闭播放器"] tap];
+}
 - (void)testSortingMenuAndSavedChoice {
     XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
     XCUIElement *sort = self.app.buttons[@"排序"];
@@ -103,6 +113,8 @@
     [self.app.staticTexts[@"时间戳偏移测试.ts"] tap];
     [self expectationForPredicate:[NSPredicate predicateWithFormat:@"exists == YES AND enabled == YES"] evaluatedWithObject:self.app.sliders[@"播放进度"] handler:nil];
     [self waitForExpectationsWithTimeout:25 handler:nil];
+    [self waitForPlaybackSecondsFrom:1 to:50];
+    [self showPlayerControls];
 }
 - (void)testControlsAutoHideAndTapToggle {
     [self openTransportStream];
@@ -128,7 +140,7 @@
     [self waitForControlsVisible:YES];
     XCTAssertTrue(self.app.buttons[@"播放"].exists);
     [self capture:@"controls-tap-revealed"];
-    [self.app.buttons[@"关闭播放器"] tap];
+    [self closePlayback];
 }
 - (void)testHorizontalCanvasSeekingWithoutGestureConflicts {
     [self openTransportStream];
@@ -168,7 +180,7 @@
     [self expectationForPredicate:[NSPredicate predicateWithFormat:@"value == '1×'"] evaluatedWithObject:self.app.buttons[@"播放倍速"] handler:nil];
     [self waitForExpectationsWithTimeout:3 handler:nil];
     [self waitForControlsVisible:YES];
-    [self.app.buttons[@"关闭播放器"] tap];
+    [self closePlayback];
 }
 - (void)testTransportStreamDurationSeekingAndResume {
     XCUIElement *folder = self.app.staticTexts[@"演示文件夹"];
@@ -193,7 +205,7 @@
     // Playback must advance after seeking, not just update the scrubber's preview.
     [self waitForPlaybackSecondsFrom:16 to:30];
     if (!self.app.buttons[@"关闭播放器"].isHittable) [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)] tap];
-    [self.app.buttons[@"关闭播放器"] tap];
+    [self closePlayback];
     [movie tap];
     [self waitForPlaybackSecondsFrom:16 to:40];
     [self assertVideoFramesAdvance:@"ts-resume"];
@@ -203,7 +215,7 @@
     [self waitForPlaybackSecondsFrom:0 to:8];
     [self assertVideoFramesAdvance:@"ts-restart-from-beginning"];
     if (!self.app.buttons[@"关闭播放器"].isHittable) [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)] tap];
-    [self.app.buttons[@"关闭播放器"] tap];
+    [self closePlayback];
 }
 - (void)testNestedBrowsingPlaybackAndHoldRestoration {
     XCUIElement *folder = self.app.staticTexts[@"演示文件夹"];
@@ -214,8 +226,9 @@
     XCTAssertTrue([movie waitForExistenceWithTimeout:10]);
     [self capture:@"nested-folder"];
     [movie tap];
+    [self waitForPlaybackSecondsFrom:1 to:50];
+    [self showPlayerControls];
     XCUIElement *pause = self.app.buttons[@"暂停"];
-    XCTAssertTrue([pause waitForExistenceWithTimeout:20]);
     NSPredicate *playing = [NSPredicate predicateWithFormat:@"value == 'playing'"];
     [self expectationForPredicate:playing evaluatedWithObject:pause handler:nil];
     [self waitForExpectationsWithTimeout:20 handler:nil];
@@ -244,7 +257,7 @@
     XCTAssertTrue(self.app.buttons[@"关闭播放器"].isHittable);
     XCTAssertTrue(self.app.buttons[@"播放"].isHittable);
     [self capture:@"player-landscape"];
-    [self.app.buttons[@"关闭播放器"] tap];
+    [self closePlayback];
     XCTAssertTrue([movie waitForExistenceWithTimeout:5]);
     [[XCUIDevice sharedDevice] setOrientation:UIDeviceOrientationPortrait];
 }
@@ -276,8 +289,8 @@
     XCUIElement *movie = self.app.staticTexts[@"黑边竖屏测试.mkv"];
     XCTAssertTrue([movie waitForExistenceWithTimeout:20]);
     [movie tap];
+    [self waitForPlaybackSecondsFrom:1 to:50];
     XCUIElement *pause = self.app.buttons[@"暂停"];
-    XCTAssertTrue([pause waitForExistenceWithTimeout:20]);
     // Allow the local crop probe to finish and then reveal the controls.
     XCTestExpectation *probe = [self expectationWithDescription:@"Black borders analyzed"];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4*NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [probe fulfill]; });
@@ -307,13 +320,13 @@
     [self.app.buttons[@"完整显示"] tap];
     XCTAssertEqualObjects(fit.value, @"完整显示");
     [self capture:@"vertical-full-frame"];
-    [self.app.buttons[@"关闭播放器"] tap];
+    [self closePlayback];
     [movie tap];
     XCTAssertTrue([fit waitForExistenceWithTimeout:20]);
     XCTAssertEqualObjects(fit.value, @"完整显示");
     [fit tap];
     [self.app.buttons[@"铺满屏幕"] tap];
-    [self.app.buttons[@"关闭播放器"] tap];
+    [self closePlayback];
 }
 - (void)testRecursiveSearchAndWrappedNames {
     NSString *longFolder = @"这是用于检查完整换行显示的长文件夹名称包含中文和English并且不应该出现省略号这些文字都应当可见";
@@ -337,11 +350,9 @@
     XCTAssertTrue(self.app.staticTexts[longFile].exists);
     [self capture:@"recursive-search"];
     [nestedMovie tap];
-    XCUIElement *pause = self.app.buttons[@"暂停"];
-    XCTAssertTrue([pause waitForExistenceWithTimeout:20]);
-    [self expectationForPredicate:[NSPredicate predicateWithFormat:@"value == 'playing'"] evaluatedWithObject:pause handler:nil];
-    [self waitForExpectationsWithTimeout:20 handler:nil];
+    [self waitForPlaybackSecondsFrom:1 to:50];
+    [self assertVideoFramesAdvance:@"search-video-moving"];
     [self capture:@"play-from-search"];
-    [self.app.buttons[@"关闭播放器"] tap];
+    [self closePlayback];
 }
 @end
