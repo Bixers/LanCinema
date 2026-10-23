@@ -74,8 +74,10 @@ class Handler(BaseHTTPRequestHandler):
         directory = checked.is_dir()
         if not directory and not checked.is_file():
             return None
+        metadata = checked.stat()
         return {'name': entry.name, 'path': entry.relative_to(self.server.root).as_posix(),
-                'directory': directory, 'size': 0 if directory else checked.stat().st_size,
+                'directory': directory, 'size': 0 if directory else metadata.st_size,
+                'modified': metadata.st_mtime,
                 'video': entry.suffix.lower() in VIDEO, 'subtitle': entry.suffix.lower() in SUBTITLES}
 
     def search(self, start, keyword):

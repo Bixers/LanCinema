@@ -89,9 +89,28 @@ jobs:
               env.write('LC_SIMULATOR_ID=' + device + '\n')
           PY
       - name: Test native UI in simulator
-        timeout-minutes: 15
+        timeout-minutes: 23
         run: |
           python3 server/ui_fixture_server.py > /tmp/lancinema-fixture.log 2>&1 &
+          python3 - <<'PY'
+          import json, time, urllib.request, urllib.parse
+          query = urllib.parse.urlencode({'token': 'ui-test-access-code', 'path': '演示文件夹/时间戳偏移测试.ts'})
+          deadline = time.monotonic() + 90
+          while time.monotonic() < deadline:
+              try:
+                  with urllib.request.urlopen('http://127.0.0.1:8123/api/playback?' + query, timeout=5) as response:
+                      state = json.load(response)
+                  if state['state'] == 'ready':
+                      print('Indexed synthetic TS fixture is ready', flush=True)
+                      break
+                  if state['state'] == 'error':
+                      raise RuntimeError(state)
+              except OSError:
+                  pass
+              time.sleep(.5)
+          else:
+              raise RuntimeError('Fixture preparation timed out')
+          PY
           set -o pipefail
           xcodebuild -workspace LanCinema.xcworkspace -scheme LanCinema \
             -configuration Debug -destination "platform=iOS Simulator,id=$LC_SIMULATOR_ID" \

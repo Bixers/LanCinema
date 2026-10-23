@@ -4,6 +4,7 @@
 #import <math.h>
 #import "Connection.h"
 #import "AudioOutput.h"
+#import "FileSort.h"
 
 static NSString *const HostKey = @"computerHost";
 static NSString *const TokenKey = @"computerAccessCode";
@@ -106,8 +107,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         url = components.URL;
     }
     VLCMedia *media = [VLCMedia mediaWithURL:url];
-    // Local HTTP media is seekable. A 1.2-second buffer was paid again after
-    // every seek; retain a small jitter buffer without adding a full second.
+    // Retain a small jitter buffer for seekable local HTTP media.
     [media addOption:@":network-caching=300"];
     [media addOption:@":audio-time-stretch"];
     // Select the resume point before input/audio output start. Starting at zero
@@ -730,6 +730,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 @property(nonatomic) NSInteger generation;
 @property(nonatomic) NSInteger skippedSearchItems;
 @property(nonatomic) BOOL itemsLoaded;
+@property(nonatomic, strong) UIBarButtonItem *sortButton;
 @end
 
 @implementation BrowserController
@@ -746,8 +747,12 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     self.tableView.sectionHeaderHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedSectionHeaderHeight = 44;
     self.navigationItem.largeTitleDisplayMode = self.folder.length ? UINavigationItemLargeTitleDisplayModeNever : UINavigationItemLargeTitleDisplayModeAutomatic;
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"network"] style:UIBarButtonItemStylePlain target:self action:@selector(settings)];
-    self.navigationItem.rightBarButtonItem.accessibilityLabel = @"电脑连接设置";
+    UIBarButtonItem *connection = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"network"] style:UIBarButtonItemStylePlain target:self action:@selector(settings)];
+    connection.accessibilityLabel = @"电脑连接设置";
+    self.sortButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.up.arrow.down"] menu:nil];
+    self.sortButton.accessibilityLabel = @"排序";
+    self.navigationItem.rightBarButtonItems = @[connection, self.sortButton];
+    [self updateSortMenu];
     UISearchController *search = [[UISearchController alloc] initWithSearchResultsController:nil];
     search.searchResultsUpdater = self;
     search.obscuresBackgroundDuringPresentation = NO;
@@ -787,7 +792,56 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 }
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
+    [self updateSortMenu];
     [self loadFolder];
+}
+- (NSString *)sortKey {
+    NSString *key = [NSUserDefaults.standardUserDefaults stringForKey:@"fileSortKey"];
+    return [@[@"name", @"size", @"modified", @"type"] containsObject:key ?: @""] ? key : @"name";
+}
+- (NSString *)sortDescription {
+    NSString *key = [self sortKey];
+    BOOL descending = [NSUserDefaults.standardUserDefaults boolForKey:@"fileSortDescending"];
+    NSString *name = @{@"name":@"文件名", @"size":@"大小", @"modified":@"修改时间", @"type":@"类型"}[key];
+    NSString *direction = [key isEqual:@"modified"] ? (descending ? @"最新在前" : @"最早在前") : ([key isEqual:@"size"] ? (descending ? @"从大到小" : @"从小到大") : (descending ? @"降序" : @"升序"));
+    return [NSString stringWithFormat:@"%@ · %@", name, direction];
+}
+- (void)applyFileSort {
+    self.visibleItems = LCSortedItems(self.visibleItems, [self sortKey], [NSUserDefaults.standardUserDefaults boolForKey:@"fileSortDescending"]);
+    [self updateSortMenu];
+    [self.tableView reloadData];
+}
+- (void)updateSortMenu {
+    NSString *key = [self sortKey];
+    BOOL descending = [NSUserDefaults.standardUserDefaults boolForKey:@"fileSortDescending"];
+    NSMutableArray *fields = [NSMutableArray new];
+    NSArray *keys = @[@"name", @"size", @"modified", @"type"];
+    NSArray *names = @[@"文件名", @"大小", @"修改时间", @"类型"];
+    __weak typeof(self) owner = self;
+    for (NSUInteger i = 0; i < keys.count; i++) {
+        NSString *field = keys[i];
+        UIAction *action = [UIAction actionWithTitle:names[i] image:nil identifier:nil handler:^(UIAction *a) {
+            [NSUserDefaults.standardUserDefaults setObject:field forKey:@"fileSortKey"];
+            [owner applyFileSort];
+        }];
+        action.state = [field isEqual:key] ? UIMenuElementStateOn : UIMenuElementStateOff;
+        [fields addObject:action];
+    }
+    NSArray *directions = [key isEqual:@"modified"] ? @[@"最早在前", @"最新在前"] : ([key isEqual:@"size"] ? @[@"从小到大", @"从大到小"] : @[@"升序", @"降序"]);
+    NSMutableArray *orders = [NSMutableArray new];
+    for (NSUInteger i = 0; i < 2; i++) {
+        BOOL reverse = i == 1;
+        UIAction *action = [UIAction actionWithTitle:directions[i] image:nil identifier:nil handler:^(UIAction *a) {
+            [NSUserDefaults.standardUserDefaults setBool:reverse forKey:@"fileSortDescending"];
+            [owner applyFileSort];
+        }];
+        action.state = reverse == descending ? UIMenuElementStateOn : UIMenuElementStateOff;
+        [orders addObject:action];
+    }
+    self.sortButton.menu = [UIMenu menuWithTitle:@"排序 · 文件夹优先" children:@[
+        [UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:fields],
+        [UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:orders]]];
+    self.sortButton.accessibilityValue = [self sortDescription];
 }
 - (void)loadFolder {
     [self.searchTimer invalidate];
@@ -830,7 +884,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
                 s.skippedSearchItems = searching ? [json[@"skipped"] integerValue] : 0;
                 s.message.text = s.visibleItems.count ? @"" : (searching ? @"没有匹配的文件" : @"这个文件夹是空的");
                 if (!s.visibleItems.count && s.skippedSearchItems > 0) s.message.text = @"没有找到匹配项\n部分目录或文件无法读取";
-                [s.tableView reloadData];
+                [s applyFileSort];
             } else if (error.code != NSURLErrorCancelled) {
                 if (!searching) { s.items = @[]; s.itemsLoaded = NO; }
                 s.visibleItems = @[];
@@ -859,7 +913,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         self.searchTimer = [NSTimer scheduledTimerWithTimeInterval:0.35 repeats:NO block:^(NSTimer *timer) { [weakSelf loadFolder]; }];
     }
     self.connectButton.hidden = YES;
-    [self.tableView reloadData];
+    [self applyFileSort];
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.visibleItems.count; }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return self.folder.length ? self.folder : [[NSUserDefaults.standardUserDefaults stringForKey:@"sharedRoot"] ?: @"共享文件夹" stringByAppendingString:@" · 只读文件库"]; }
@@ -867,9 +921,9 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     if (self.navigationItem.searchController.searchBar.text.length) {
         NSString *summary = [NSString stringWithFormat:@"搜索当前文件夹及所有子文件夹 · %lu 项", (unsigned long)self.visibleItems.count];
         if (self.skippedSearchItems > 0) summary = [summary stringByAppendingFormat:@"\n%ld 个项目无法读取或不在搜索范围内", (long)self.skippedSearchItems];
-        return summary;
+        return [summary stringByAppendingFormat:@"\n%@ · 文件夹优先", [self sortDescription]];
     }
-    return @"点击文件夹进入 · 点击视频播放\n播放时长按画面临时倍速，松开恢复";
+    return [NSString stringWithFormat:@"%@ · 文件夹优先\n点击文件夹进入 · 点击视频播放", [self sortDescription]];
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"file"];
@@ -883,6 +937,13 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     cell.textLabel.numberOfLines = 0;
     cell.textLabel.lineBreakMode = NSLineBreakByCharWrapping;
     cell.detailTextLabel.text = folder ? @"文件夹" : [NSByteCountFormatter stringFromByteCount:[item[@"size"] longLongValue] countStyle:NSByteCountFormatterCountStyleFile];
+    if ([[self sortKey] isEqual:@"modified"]) {
+        NSString *date = [item[@"modified"] isKindOfClass:NSNumber.class] ? [NSDateFormatter localizedStringFromDate:[NSDate dateWithTimeIntervalSince1970:[item[@"modified"] doubleValue]] dateStyle:NSDateFormatterShortStyle timeStyle:NSDateFormatterShortStyle] : @"修改时间不可用，请更新电脑端";
+        cell.detailTextLabel.text = [cell.detailTextLabel.text stringByAppendingFormat:@" · %@", date];
+    } else if ([[self sortKey] isEqual:@"type"] && !folder) {
+        NSString *extension = [item[@"name"] pathExtension].uppercaseString;
+        cell.detailTextLabel.text = [cell.detailTextLabel.text stringByAppendingFormat:@" · %@", extension.length ? extension : @"无扩展名"];
+    }
     cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
     cell.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
     cell.detailTextLabel.adjustsFontForContentSizeCategory = YES;

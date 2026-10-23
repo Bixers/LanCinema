@@ -17,6 +17,29 @@
     a.lifetime = XCTAttachmentLifetimeKeepAlways;
     [self addAttachment:a];
 }
+- (void)testSortingMenuAndSavedChoice {
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    XCUIElement *sort = self.app.buttons[@"排序"];
+    [sort tap];
+    [self capture:@"sorting-menu"];
+    [self.app.buttons[@"大小"] tap];
+    [sort tap];
+    [self.app.buttons[@"从大到小"] tap];
+    XCTAssertEqualObjects(sort.value, @"大小 · 从大到小");
+    [self.app.staticTexts[@"演示文件夹"] tap];
+    XCTAssertEqualObjects(sort.value, @"大小 · 从大到小");
+    XCTAssertTrue([self.app.cells elementBoundByIndex:0].staticTexts[@"下一层"].exists);
+    [sort tap];
+    [self.app.buttons[@"修改时间"] tap];
+    XCTAssertEqualObjects(sort.value, @"修改时间 · 最新在前");
+    [self capture:@"sorting-modified"];
+    [self.app terminate];
+    // Preserve the defaults written by the real sorting menu across relaunch.
+    self.app.launchArguments = @[];
+    [self.app launch];
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    XCTAssertEqualObjects(self.app.buttons[@"排序"].value, @"修改时间 · 最新在前");
+}
 - (NSData *)videoPixels {
     CGImageRef image = self.app.screenshot.image.CGImage;
     size_t width = CGImageGetWidth(image), height = CGImageGetHeight(image);

@@ -46,6 +46,14 @@ class ServerTests(unittest.TestCase):
         item = json.loads(body)['items'][0]
         self.assertEqual(item['path'], '中文 空格 # & %/clip.mkv')
         self.assertTrue(item['video'])
+        self.assertEqual(item['size'], 1024)
+        self.assertAlmostEqual(item['modified'], (self.folder / 'clip.mkv').stat().st_mtime, places=3)
+
+    def test_search_returns_modification_time(self):
+        status, _, body = self.request('/api/search', '', query={'q': 'clip'})
+        self.assertEqual(status, 200)
+        item = json.loads(body)['items'][0]
+        self.assertAlmostEqual(item['modified'], (self.folder / 'clip.mkv').stat().st_mtime, places=3)
 
     def test_directories_first(self):
         _, _, body = self.request('/api/list', '')
