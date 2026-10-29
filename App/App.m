@@ -332,7 +332,11 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     NSError *audioError;
     [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeMoviePlayback options:0 error:&audioError];
     [[AVAudioSession sharedInstance] setActive:YES error:&audioError];
-    self.player = [[VLCMediaPlayer alloc] initWithOptions:@[@"--no-video-title-show"]];
+    // VLC renders subtitles with FreeType, independently of UIKit's font
+    // fallback. Use the bundled, UIAppFonts-registered CJK family explicitly.
+    self.player = [[VLCMediaPlayer alloc] initWithOptions:@[@"--no-video-title-show",
+        @"--text-renderer=freetype", @"--freetype-font=Noto Sans CJK SC",
+        @"--freetype-monofont=Noto Sans CJK SC"]];
     self.player.delegate = self;
     self.player.drawable = self.videoSurface;
     self.player.scaleFactor = 0;

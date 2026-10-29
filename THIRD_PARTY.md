@@ -1,5 +1,7 @@
 # 第三方组件
 
+- Noto Sans CJK SC Regular 2.004：SIL Open Font License 1.1；https://github.com/notofonts/noto-cjk/tree/Sans2.004 。字幕字体随 App 打包，许可见 `App/Fonts/NotoSansCJK-OFL.txt`。
+
 - VideoLAN MobileVLCKit 3.7.2：LGPL 2.1 或更新版本；源码 https://github.com/videolan/vlckit 。应用内保留许可全文。
 - PySide6 / Qt 6.10.3：LGPLv3 / GPLv3 / 商业许可；本项目使用开源组件，源码 https://code.qt.io/ 和 https://code.qt.io/cgit/pyside/pyside-setup.git/ 。
 - Python 3.9：PSF 许可；源码 https://www.python.org/downloads/source/ 。

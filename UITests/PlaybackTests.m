@@ -1,4 +1,5 @@
 #import <XCTest/XCTest.h>
+#import <Vision/Vision.h>
 
 @interface PlaybackTests : XCTestCase
 @property(nonatomic, strong) XCUIApplication *app;
@@ -33,6 +34,39 @@
     // Freeze the hide timer before the slower XCTest snapshot/tap sequence.
     if (self.app.buttons[@"暂停"].isHittable) [self.app.buttons[@"暂停"] tap];
     [self.app.buttons[@"关闭播放器"] tap];
+}
+- (void)testChineseExternalSubtitleRendering {
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    [self.app.staticTexts[@"演示文件夹"] tap];
+    XCUIElement *movie = self.app.staticTexts[@"字幕字形测试.mkv"];
+    XCTAssertTrue([movie waitForExistenceWithTimeout:10]);
+    [movie tap];
+    [self waitForPlaybackSecondsFrom:1 to:50];
+    [self.app.buttons[@"字幕和音轨"] tap];
+    [self.app.buttons[@"外挂 · 中文字幕验证.srt"] tap];
+    [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)] tap];
+    BOOL recognized = NO;
+    for (NSInteger attempt = 0; attempt < 8 && !recognized; attempt++) {
+        XCTestExpectation *settled = [self expectationWithDescription:@"Subtitle frame rendered"];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [settled fulfill]; });
+        [self waitForExpectationsWithTimeout:3 handler:nil];
+        VNRecognizeTextRequest *request = [VNRecognizeTextRequest new];
+        request.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
+        request.recognitionLanguages = @[@"zh-Hans", @"zh-Hant", @"en-US"];
+        request.usesLanguageCorrection = NO;
+        VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:self.app.screenshot.image.CGImage options:@{}];
+        NSError *error;
+        XCTAssertTrue([handler performRequests:@[request] error:&error], @"%@", error);
+        NSMutableString *text = [NSMutableString new];
+        for (VNRecognizedTextObservation *line in request.results) [text appendString:[line topCandidates:1].firstObject.string ?: @""];
+        NSString *compact = [[text componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] componentsJoinedByString:@""];
+        NSLog(@"SUBTITLE_OCR %@", compact);
+        recognized = ([compact containsString:@"中文字幕显示正常"] || [compact containsString:@"中文字幕顯示正常"]) &&
+                     ([compact containsString:@"繁體字幕測試成功"] || [compact containsString:@"繁体字幕测试成功"]);
+    }
+    [self capture:@"chinese-subtitle-rendered"];
+    XCTAssertTrue(recognized, @"Rendered subtitle must contain readable Chinese, not missing-glyph squares");
+    [self closePlayback];
 }
 - (void)testSortingMenuAndSavedChoice {
     XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
