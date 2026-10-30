@@ -5,13 +5,6 @@
 #import "Connection.h"
 #import "AudioOutput.h"
 #import "FileSort.h"
-#import "VideoGeometry.h"
-
-// Public libvlc frame-step API; use the same owning-player bridge as audio.
-extern void libvlc_media_player_next_frame(void *);
-@interface VLCMediaPlayer (LCVideoBridge)
-- (void *)libVLCMediaPlayer;
-@end
 
 static NSString *const HostKey = @"computerHost";
 static NSString *const TokenKey = @"computerAccessCode";
@@ -64,7 +57,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 @property(nonatomic, strong) NSDictionary *detectedCrop;
 @property(nonatomic, strong) NSURLSessionDataTask *cropTask;
 @property(nonatomic, copy) NSString *appliedGeometry;
-@property(nonatomic) BOOL hasConfiguredCrop;
+@property(nonatomic) CGSize naturalSize;
 @property(nonatomic, strong) UIView *header;
 @property(nonatomic, strong) UIStackView *footer;
 @property(nonatomic, strong) UILabel *statusLabel;
@@ -362,20 +355,6 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     self.statusLabel.text = @"正在打开视频…";
     if ([self isTransportStream]) [self prepareTransportStream];
     else [self.player play];
-    __weak typeof(self) weakSelf = self;
-    self.timer = [NSTimer timerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *timer) { [weakSelf tick]; }];
-    [NSRunLoop.mainRunLoop addTimer:self.timer forMode:NSRunLoopCommonModes];
-    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(background) name:UIApplicationWillResignActiveNotification object:nil];
-    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(active) name:UIApplicationDidBecomeActiveNotification object:nil];
-    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(audioInterrupted:) name:AVAudioSessionInterruptionNotification object:nil];
-    UIApplication.sharedApplication.idleTimerDisabled = YES;
-}
-- (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews]; [self updateVideoLayout]; }
-- (void)startCropProbeAfterFirstFrames {
-    if (self.closed || self.cropTask || self.lastDisplayedFrames < 2) return;
-#if DEBUG
-    NSLog(@"CROP_PROBE starts after %ld displayed frames", (long)self.lastDisplayedFrames);
-#endif
     NSMutableURLRequest *cropRequest = [NSMutableURLRequest requestWithURL:ServiceURL(@"/api/crop", self.item[@"path"])];
     cropRequest.timeoutInterval = 30;
     __weak typeof(self) cropOwner = self;
@@ -385,81 +364,53 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         dispatch_async(dispatch_get_main_queue(), ^{ if (!cropOwner.closed) { cropOwner.detectedCrop = crop; [cropOwner updateVideoLayout]; } });
     }];
     [self.cropTask resume];
+    __weak typeof(self) weakSelf = self;
+    self.timer = [NSTimer timerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *timer) { [weakSelf tick]; }];
+    [NSRunLoop.mainRunLoop addTimer:self.timer forMode:NSRunLoopCommonModes];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(background) name:UIApplicationWillResignActiveNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(active) name:UIApplicationDidBecomeActiveNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(audioInterrupted:) name:AVAudioSessionInterruptionNotification object:nil];
+    UIApplication.sharedApplication.idleTimerDisabled = YES;
 }
-- (NSString *)displayMode {
-    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-    NSString *mode = [defaults stringForKey:@"videoDisplayMode"];
-    if (![@[@"smart", @"fill", @"full"] containsObject:mode]) {
-        // Keep an explicit full-frame preference; replace the old default zoom.
-        mode = [defaults boolForKey:@"fitEntireVideo"] ? @"full" : @"smart";
-        [defaults setObject:mode forKey:@"videoDisplayMode"];
-    }
-    return mode;
-}
-- (void)refreshVideoSurfaceLayout {
-    if (self.closed) return;
-    // VLC 3's iOS output can skip its viewport update when only crop changes.
-    // Request ordinary UIKit layout after the asynchronous crop command lands.
-    // No transforms, private selectors, decoder restart, or audio reset.
-    for (UIView *view in self.videoSurface.subviews) {
-        [view setNeedsLayout];
-        [view layoutIfNeeded];
-    }
-}
+- (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews]; [self updateVideoLayout]; }
 - (void)updateVideoLayout {
     if (!self.player || self.closed) return;
-    NSString *mode = self.displayMode;
-    self.fitButton.accessibilityValue = [@{@"smart":@"智能适配", @"fill":@"裁切铺满", @"full":@"完整显示"} objectForKey:mode];
-    if (!CGRectEqualToRect(self.videoSurface.frame, self.canvas.bounds)) self.videoSurface.frame = self.canvas.bounds;
-    // Opening needs the decoder and audio clock first. Query track geometry and
-    // change the render viewport only after actual video frames have arrived.
-    if (self.lastDisplayedFrames < 2) return;
-    if (!self.player.hasVideoOut) { self.appliedGeometry = nil; return; }
+    BOOL fill = ![NSUserDefaults.standardUserDefaults boolForKey:@"fitEntireVideo"];
+    self.fitButton.accessibilityValue = fill ? @"铺满屏幕" : @"完整显示";
     CGSize video = self.player.videoSize;
-    double sar = 1;
-    BOOL upright = YES;
-    for (NSDictionary *track in self.player.media.tracksInformation) {
-        if ([track[VLCMediaTracksInformationType] isEqual:VLCMediaTracksInformationTypeVideo]) {
-            double width = [track[VLCMediaTracksInformationVideoWidth] doubleValue];
-            double height = [track[VLCMediaTracksInformationVideoHeight] doubleValue];
-            if (width > 0 && height > 0) video = CGSizeMake(width, height);
-            double numerator = [track[VLCMediaTracksInformationSourceAspectRatio] doubleValue];
-            double denominator = [track[VLCMediaTracksInformationSourceAspectRatioDenominator] doubleValue];
-            if (numerator > 0 && denominator > 0) sar = numerator/denominator;
-            upright = [track[VLCMediaTracksInformationVideoOrientation] integerValue] == VLCMediaOrientationTopLeft;
-            break;
+    if (self.naturalSize.width <= 0 && video.width > 0 && video.height > 0) self.naturalSize = video;
+    video = self.naturalSize;
+    CGSize viewport = self.canvas.bounds.size;
+    if (viewport.width <= 0 || viewport.height <= 0) return;
+    double zoom = 1, shiftX = 0, shiftY = 0;
+    if (fill && video.width > 0 && video.height > 0) {
+        double x = 0, y = 0, w = video.width, h = video.height;
+        NSDictionary *c = self.detectedCrop;
+        if ([c[@"width"] doubleValue] == video.width && [c[@"height"] doubleValue] == video.height && [c[@"w"] doubleValue] > 0 && [c[@"h"] doubleValue] > 0) {
+            x = [c[@"x"] doubleValue]; y = [c[@"y"] doubleValue]; w = [c[@"w"] doubleValue]; h = [c[@"h"] doubleValue];
         }
+        double baseFit = MIN(viewport.width/video.width, viewport.height/video.height);
+        zoom = MAX(viewport.width/(w*baseFit), viewport.height/(h*baseFit));
+        shiftX = (x+w/2-video.width/2)*baseFit*zoom;
+        shiftY = (y+h/2-video.height/2)*baseFit*zoom;
     }
-    NSString *geometry = LCVideoCropGeometry(mode, video, self.canvas.bounds.size, self.detectedCrop, sar, upright);
+    NSString *geometry = [NSString stringWithFormat:@"%.2f:%.2f:%.4f:%.2f:%.2f", viewport.width, viewport.height, zoom, shiftX, shiftY];
     if (![geometry isEqualToString:self.appliedGeometry]) {
         self.appliedGeometry = geometry;
-        // Fresh outputs already fit the uncropped source. Avoid reallocating
-        // GL buffers during first audio/video startup when there is no crop.
-        if (geometry.length == 0 && !self.hasConfiguredCrop) return;
-        self.hasConfiguredCrop = YES;
-        self.player.videoCropGeometry = (char *)geometry.UTF8String;
-        __weak typeof(self) owner = self;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC/5), dispatch_get_main_queue(), ^{
-            PlayerController *s = owner;
-            if (!s || s.closed || ![s.appliedGeometry isEqual:geometry]) return;
-            [s refreshVideoSurfaceLayout];
-            // VLC's paused output can retain its previous crop until a new
-            // frame arrives. Advance one frame without resuming audio/playback.
-            if (s.player.state == VLCMediaPlayerStatePaused)
-                libvlc_media_player_next_frame(s.player.libVLCMediaPlayer);
-        });
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC/2), dispatch_get_main_queue(), ^{ [owner refreshVideoSurfaceLayout]; });
+        // Keep VLC's output at the viewport resolution. The compositor magnifies it
+        // inside a clipped container, avoiding platform-dependent VLC crop offsets.
+        self.videoSurface.transform = CGAffineTransformIdentity;
+        self.videoSurface.bounds = CGRectMake(0, 0, viewport.width, viewport.height);
+        self.videoSurface.center = CGPointMake(viewport.width/2-shiftX, viewport.height/2-shiftY);
+        self.videoSurface.transform = CGAffineTransformMakeScale(zoom, zoom);
     }
 }
 - (void)fitMenu {
     self.controlsTouched = NSDate.timeIntervalSinceReferenceDate;
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"画面显示方式" message:@"智能适配：去除检测到的黑边，保留有效画面。\n裁切铺满：铺满屏幕，可能裁掉画面边缘。\n完整显示：保留原始画面和黑边。\n选择会自动保存。" preferredStyle:UIAlertControllerStyleActionSheet];
-    NSArray *modes = @[@"smart", @"fill", @"full"];
-    NSArray *names = @[@"智能适配", @"裁切铺满", @"完整显示"];
-    for (NSUInteger index = 0; index < modes.count; index++) {
-        NSString *mode = modes[index];
-        [sheet addAction:[UIAlertAction actionWithTitle:names[index] style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            [NSUserDefaults.standardUserDefaults setObject:mode forKey:@"videoDisplayMode"];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"画面显示方式" message:@"铺满屏幕会按比例放大并裁掉部分边缘；自动识别视频内黑边。完整显示保留原画面。选择会自动保存。" preferredStyle:UIAlertControllerStyleActionSheet];
+    for (NSString *name in @[@"铺满屏幕", @"完整显示"]) {
+        [sheet addAction:[UIAlertAction actionWithTitle:name style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            [NSUserDefaults.standardUserDefaults setBool:[name isEqualToString:@"完整显示"] forKey:@"fitEntireVideo"];
             self.controlsTouched = NSDate.timeIntervalSinceReferenceDate;
             [self updateVideoLayout];
         }]];
@@ -637,7 +588,6 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     if (self.waitingForSeekFrames && displayed > self.seekFrameBaseline + 2 && fabs(actualTime - self.pendingSeekTime) < 8) self.waitingForSeekFrames = NO;
     if (!self.waitingForSeekFrames && displayed > self.lastDisplayedFrames) self.lastPlayableTime = actualTime;
     self.lastDisplayedFrames = displayed;
-    [self startCropProbeAfterFirstFrames];
     self.slider.enabled = self.player.isSeekable && duration > 0;
     self.gestureSurface.accessibilityValue = [NSString stringWithFormat:@"%@ / %@", ClockText([self currentPlaybackTime]), ClockText(duration)];
     if (!self.scrubbing && !self.panning) {
