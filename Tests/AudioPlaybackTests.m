@@ -30,6 +30,12 @@
 - (void)setUp {
     [super setUp];
     self.continueAfterFailure = NO;
+    // A person opens a video from an active app. Do not include XCTest's
+    // foreground handoff from its UI runner in playback recovery measurements.
+    NSDate *activeDeadline = [NSDate dateWithTimeIntervalSinceNow:10];
+    while (UIApplication.sharedApplication.applicationState != UIApplicationStateActive && activeDeadline.timeIntervalSinceNow > 0)
+        [self advanceRunLoop:.05];
+    XCTAssertEqual(UIApplication.sharedApplication.applicationState, UIApplicationStateActive);
     [NSUserDefaults.standardUserDefaults setObject:@"127.0.0.1" forKey:@"computerHost"];
     [NSUserDefaults.standardUserDefaults setFloat:1 forKey:@"playbackRate"];
     XCTAssertTrue(LCStorePassword(@"ui-test-access-code"));
@@ -66,12 +72,14 @@
     [self.window.rootViewController presentViewController:controller animated:NO completion:nil];
     XCTAssertNotNil(controller.audioOutput);
     [controller.audioOutput beginRenderProbe];
+    NSLog(@"AUDIO_OPEN app=%ld scene=%ld player=%ld prepared=%@ preparing=%@ pending_active=%@", (long)UIApplication.sharedApplication.applicationState, (long)self.window.windowScene.activationState, (long)controller.player.state, [controller valueForKey:@"prepared"], [controller valueForKey:@"preparing"], [controller valueForKey:@"resumeAfterBackground"]);
     return controller;
 }
 - (double)checkSound:(PlayerController *)controller label:(NSString *)label {
     // Observe non-silent PCM rendered by the production AVAudioEngine mixer.
     // This is downstream of decoding and scheduling, with no replacement sink.
     [self advanceRunLoop:2];
+    NSLog(@"AUDIO_STATE %@ app=%ld player=%ld media=%d prepared=%@ preparing=%@ pending_active=%@ status=%@", label, (long)UIApplication.sharedApplication.applicationState, (long)controller.player.state, controller.player.media != nil, [controller valueForKey:@"prepared"], [controller valueForKey:@"preparing"], [controller valueForKey:@"resumeAfterBackground"], [[controller valueForKey:@"statusLabel"] text]);
     double delay = controller.audioOutput.renderProbeDelay;
     NSUInteger count = controller.audioOutput.renderedNonSilentBuffers;
     double longestGap = controller.audioOutput.renderProbeLongestGap;

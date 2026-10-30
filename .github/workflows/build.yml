@@ -6,6 +6,10 @@ on:
         description: 'Run display-mode UI checks and all unit/audio tests'
         type: boolean
         default: false
+      unit_only:
+        description: 'Run all unit/audio tests in a fresh simulator without UI-runner handoff'
+        type: boolean
+        default: false
   push:
     branches: [main]
 permissions:
@@ -118,7 +122,9 @@ jobs:
           PY
           set -o pipefail
           TEST_SELECTION=()
-          if [ '${{ inputs.focused }}' = 'true' ]; then
+          if [ '${{ inputs.unit_only }}' = 'true' ]; then
+            TEST_SELECTION=('-only-testing:LanCinemaTests')
+          elif [ '${{ inputs.focused }}' = 'true' ]; then
             TEST_SELECTION=(
               '-only-testing:LanCinemaUITests/PlaybackTests/testAutomaticFillAndSavedDisplayMode'
               '-only-testing:LanCinemaUITests/PlaybackTests/testSmartCropKeepsSubtitlesVisible'
