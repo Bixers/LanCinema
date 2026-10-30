@@ -45,6 +45,10 @@
     [self.app.buttons[@"字幕和音轨"] tap];
     [self.app.buttons[@"外挂 · 中文字幕验证.srt"] tap];
     [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)] tap];
+    [self assertReadableChineseSubtitle:@"chinese-subtitle-rendered"];
+    [self closePlayback];
+}
+- (void)assertReadableChineseSubtitle:(NSString *)name {
     BOOL recognized = NO;
     for (NSInteger attempt = 0; attempt < 8 && !recognized; attempt++) {
         XCTestExpectation *settled = [self expectationWithDescription:@"Subtitle frame rendered"];
@@ -64,8 +68,28 @@
         recognized = ([compact containsString:@"中文字幕显示正常"] || [compact containsString:@"中文字幕顯示正常"]) &&
                      ([compact containsString:@"繁體字幕測試成功"] || [compact containsString:@"繁体字幕测试成功"]);
     }
-    [self capture:@"chinese-subtitle-rendered"];
+    [self capture:name];
     XCTAssertTrue(recognized, @"Rendered subtitle must contain readable Chinese, not missing-glyph squares");
+}
+- (void)testSmartCropKeepsSubtitlesVisible {
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    [self.app.staticTexts[@"演示文件夹"] tap];
+    [self.app.staticTexts[@"偏心黑边字幕测试.mkv"] tap];
+    [self waitForPlaybackSecondsFrom:1 to:50];
+    [self.app.buttons[@"字幕和音轨"] tap];
+    [self.app.buttons[@"外挂 · 偏心画面字幕.srt"] tap];
+    [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)] tap];
+    [self assertReadableChineseSubtitle:@"smart-subtitle-fit"];
+    [self showPlayerControls];
+    [self.app.buttons[@"画面显示方式"] tap];
+    [self.app.buttons[@"裁切铺满"] tap];
+    [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)] tap];
+    [self assertReadableChineseSubtitle:@"smart-subtitle-fill"];
+    [self showPlayerControls];
+    [self.app.buttons[@"画面显示方式"] tap];
+    [self.app.buttons[@"完整显示"] tap];
+    [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)] tap];
+    [self assertReadableChineseSubtitle:@"smart-subtitle-full"];
     [self closePlayback];
 }
 - (void)testSortingMenuAndSavedChoice {
@@ -356,7 +380,7 @@
     XCUIElement *fit = self.app.buttons[@"画面显示方式"];
     if (!fit.isHittable) [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)] tap];
     [pause tap];
-    XCTAssertEqualObjects(fit.value, @"铺满屏幕");
+    XCTAssertEqualObjects(fit.value, @"智能适配");
     // Check actual pixels: the colorful synthetic subject must occupy the center,
     // rather than a black frame or the original tiny rectangle within black bars.
     CGImageRef image = self.app.screenshot.image.CGImage;
@@ -373,7 +397,12 @@
     }
     CGContextRelease(context); CGColorSpaceRelease(colors); free(pixels);
     XCTAssertGreaterThan((double)colorful/sampled, 0.35);
-    [self capture:@"vertical-auto-fill"];
+    [self capture:@"smart-vertical-fit"];
+    [fit tap];
+    [self capture:@"smart-display-menu"];
+    [self.app.buttons[@"裁切铺满"] tap];
+    XCTAssertEqualObjects(fit.value, @"裁切铺满");
+    [self capture:@"smart-vertical-fill"];
     [fit tap];
     [self.app.buttons[@"完整显示"] tap];
     XCTAssertEqualObjects(fit.value, @"完整显示");
@@ -383,7 +412,7 @@
     XCTAssertTrue([fit waitForExistenceWithTimeout:20]);
     XCTAssertEqualObjects(fit.value, @"完整显示");
     [fit tap];
-    [self.app.buttons[@"铺满屏幕"] tap];
+    [self.app.buttons[@"智能适配"] tap];
     [self closePlayback];
 }
 - (void)testRecursiveSearchAndWrappedNames {

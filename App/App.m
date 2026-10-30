@@ -5,6 +5,7 @@
 #import "Connection.h"
 #import "AudioOutput.h"
 #import "FileSort.h"
+#import "VideoGeometry.h"
 
 static NSString *const HostKey = @"computerHost";
 static NSString *const TokenKey = @"computerAccessCode";
@@ -57,7 +58,6 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 @property(nonatomic, strong) NSDictionary *detectedCrop;
 @property(nonatomic, strong) NSURLSessionDataTask *cropTask;
 @property(nonatomic, copy) NSString *appliedGeometry;
-@property(nonatomic) CGSize naturalSize;
 @property(nonatomic, strong) UIView *header;
 @property(nonatomic, strong) UIStackView *footer;
 @property(nonatomic, strong) UILabel *statusLabel;
@@ -373,44 +373,65 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     UIApplication.sharedApplication.idleTimerDisabled = YES;
 }
 - (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews]; [self updateVideoLayout]; }
+- (NSString *)displayMode {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSString *mode = [defaults stringForKey:@"videoDisplayMode"];
+    if (![@[@"smart", @"fill", @"full"] containsObject:mode]) {
+        // Keep an explicit full-frame preference; replace the old default zoom.
+        mode = [defaults boolForKey:@"fitEntireVideo"] ? @"full" : @"smart";
+        [defaults setObject:mode forKey:@"videoDisplayMode"];
+    }
+    return mode;
+}
+- (void)refreshVideoSurfaceLayout {
+    if (self.closed) return;
+    // VLC 3's iOS output can skip its viewport update when only crop changes.
+    // Request ordinary UIKit layout after the asynchronous crop command lands.
+    // No transforms, private selectors, decoder restart, or audio reset.
+    for (UIView *view in self.videoSurface.subviews) {
+        [view setNeedsLayout];
+        [view layoutIfNeeded];
+    }
+}
 - (void)updateVideoLayout {
     if (!self.player || self.closed) return;
-    BOOL fill = ![NSUserDefaults.standardUserDefaults boolForKey:@"fitEntireVideo"];
-    self.fitButton.accessibilityValue = fill ? @"铺满屏幕" : @"完整显示";
+    NSString *mode = self.displayMode;
+    self.fitButton.accessibilityValue = [@{@"smart":@"智能适配", @"fill":@"裁切铺满", @"full":@"完整显示"} objectForKey:mode];
+    self.videoSurface.frame = self.canvas.bounds;
+    if (!self.player.hasVideoOut) { self.appliedGeometry = nil; return; }
     CGSize video = self.player.videoSize;
-    if (self.naturalSize.width <= 0 && video.width > 0 && video.height > 0) self.naturalSize = video;
-    video = self.naturalSize;
-    CGSize viewport = self.canvas.bounds.size;
-    if (viewport.width <= 0 || viewport.height <= 0) return;
-    double zoom = 1, shiftX = 0, shiftY = 0;
-    if (fill && video.width > 0 && video.height > 0) {
-        double x = 0, y = 0, w = video.width, h = video.height;
-        NSDictionary *c = self.detectedCrop;
-        if ([c[@"width"] doubleValue] == video.width && [c[@"height"] doubleValue] == video.height && [c[@"w"] doubleValue] > 0 && [c[@"h"] doubleValue] > 0) {
-            x = [c[@"x"] doubleValue]; y = [c[@"y"] doubleValue]; w = [c[@"w"] doubleValue]; h = [c[@"h"] doubleValue];
+    double sar = 1;
+    BOOL upright = YES;
+    for (NSDictionary *track in self.player.media.tracksInformation) {
+        if ([track[VLCMediaTracksInformationType] isEqual:VLCMediaTracksInformationTypeVideo]) {
+            double width = [track[VLCMediaTracksInformationVideoWidth] doubleValue];
+            double height = [track[VLCMediaTracksInformationVideoHeight] doubleValue];
+            if (width > 0 && height > 0) video = CGSizeMake(width, height);
+            double numerator = [track[VLCMediaTracksInformationSourceAspectRatio] doubleValue];
+            double denominator = [track[VLCMediaTracksInformationSourceAspectRatioDenominator] doubleValue];
+            if (numerator > 0 && denominator > 0) sar = numerator/denominator;
+            upright = [track[VLCMediaTracksInformationVideoOrientation] integerValue] == VLCMediaOrientationTopLeft;
+            break;
         }
-        double baseFit = MIN(viewport.width/video.width, viewport.height/video.height);
-        zoom = MAX(viewport.width/(w*baseFit), viewport.height/(h*baseFit));
-        shiftX = (x+w/2-video.width/2)*baseFit*zoom;
-        shiftY = (y+h/2-video.height/2)*baseFit*zoom;
     }
-    NSString *geometry = [NSString stringWithFormat:@"%.2f:%.2f:%.4f:%.2f:%.2f", viewport.width, viewport.height, zoom, shiftX, shiftY];
+    NSString *geometry = LCVideoCropGeometry(mode, video, self.canvas.bounds.size, self.detectedCrop, sar, upright);
     if (![geometry isEqualToString:self.appliedGeometry]) {
         self.appliedGeometry = geometry;
-        // Keep VLC's output at the viewport resolution. The compositor magnifies it
-        // inside a clipped container, avoiding platform-dependent VLC crop offsets.
-        self.videoSurface.transform = CGAffineTransformIdentity;
-        self.videoSurface.bounds = CGRectMake(0, 0, viewport.width, viewport.height);
-        self.videoSurface.center = CGPointMake(viewport.width/2-shiftX, viewport.height/2-shiftY);
-        self.videoSurface.transform = CGAffineTransformMakeScale(zoom, zoom);
+        self.player.videoCropGeometry = (char *)geometry.UTF8String;
+        __weak typeof(self) owner = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC/5), dispatch_get_main_queue(), ^{ [owner refreshVideoSurfaceLayout]; });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC/2), dispatch_get_main_queue(), ^{ [owner refreshVideoSurfaceLayout]; });
     }
 }
 - (void)fitMenu {
     self.controlsTouched = NSDate.timeIntervalSinceReferenceDate;
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"画面显示方式" message:@"铺满屏幕会按比例放大并裁掉部分边缘；自动识别视频内黑边。完整显示保留原画面。选择会自动保存。" preferredStyle:UIAlertControllerStyleActionSheet];
-    for (NSString *name in @[@"铺满屏幕", @"完整显示"]) {
-        [sheet addAction:[UIAlertAction actionWithTitle:name style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            [NSUserDefaults.standardUserDefaults setBool:[name isEqualToString:@"完整显示"] forKey:@"fitEntireVideo"];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"画面显示方式" message:@"智能适配：去除检测到的黑边，保留有效画面。\n裁切铺满：铺满屏幕，可能裁掉画面边缘。\n完整显示：保留原始画面和黑边。\n选择会自动保存。" preferredStyle:UIAlertControllerStyleActionSheet];
+    NSArray *modes = @[@"smart", @"fill", @"full"];
+    NSArray *names = @[@"智能适配", @"裁切铺满", @"完整显示"];
+    for (NSUInteger index = 0; index < modes.count; index++) {
+        NSString *mode = modes[index];
+        [sheet addAction:[UIAlertAction actionWithTitle:names[index] style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            [NSUserDefaults.standardUserDefaults setObject:mode forKey:@"videoDisplayMode"];
             self.controlsTouched = NSDate.timeIntervalSinceReferenceDate;
             [self updateVideoLayout];
         }]];
