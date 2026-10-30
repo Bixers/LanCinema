@@ -7,6 +7,12 @@
 #import "FileSort.h"
 #import "VideoGeometry.h"
 
+// Public libvlc frame-step API; use the same owning-player bridge as audio.
+extern void libvlc_media_player_next_frame(void *);
+@interface VLCMediaPlayer (LCVideoBridge)
+- (void *)libVLCMediaPlayer;
+@end
+
 static NSString *const HostKey = @"computerHost";
 static NSString *const TokenKey = @"computerAccessCode";
 static NSString *const RateKey = @"playbackRate";
@@ -419,7 +425,15 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         self.appliedGeometry = geometry;
         self.player.videoCropGeometry = (char *)geometry.UTF8String;
         __weak typeof(self) owner = self;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC/5), dispatch_get_main_queue(), ^{ [owner refreshVideoSurfaceLayout]; });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC/5), dispatch_get_main_queue(), ^{
+            PlayerController *s = owner;
+            if (!s || s.closed || ![s.appliedGeometry isEqual:geometry]) return;
+            [s refreshVideoSurfaceLayout];
+            // VLC's paused output can retain its previous crop until a new
+            // frame arrives. Advance one frame without resuming audio/playback.
+            if (s.player.state == VLCMediaPlayerStatePaused)
+                libvlc_media_player_next_frame(s.player.libVLCMediaPlayer);
+        });
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC/2), dispatch_get_main_queue(), ^{ [owner refreshVideoSurfaceLayout]; });
     }
 }

@@ -127,7 +127,10 @@
 - (NSData *)videoPixels {
     CGImageRef image = self.app.screenshot.image.CGImage;
     size_t width = CGImageGetWidth(image), height = CGImageGetHeight(image);
-    CGImageRef crop = CGImageCreateWithImageInRect(image, CGRectMake(width*.1, height*.3, width*.8, height*.4));
+    // Both moving fixtures are 16:9. Sample the middle 80% of the
+    // actual fitted picture, excluding the intentional portrait letterboxing.
+    CGFloat pictureHeight = MIN((CGFloat)height, width*9.0/16.0);
+    CGImageRef crop = CGImageCreateWithImageInRect(image, CGRectMake(width*.1, (height-pictureHeight*.8)/2, width*.8, pictureHeight*.8));
     NSMutableData *pixels = [NSMutableData dataWithLength:64*64*4];
     CGColorSpaceRef colors = CGColorSpaceCreateDeviceRGB();
     CGContextRef context = CGBitmapContextCreate(pixels.mutableBytes, 64, 64, 8, 64*4, colors, (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
@@ -367,6 +370,32 @@
     [self.app launch];
     XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
 }
+- (void)waitForPictureCoverageFrom:(double)minimum to:(double)maximum {
+    BOOL matched = NO;
+    for (NSInteger attempt = 0; attempt < 8 && !matched; attempt++) {
+        CGImageRef image = self.app.screenshot.image.CGImage;
+        unsigned char pixels[64*128*4] = {0};
+        CGColorSpaceRef colors = CGColorSpaceCreateDeviceRGB();
+        CGContextRef context = CGBitmapContextCreate(pixels, 64, 128, 8, 64*4, colors, kCGImageAlphaPremultipliedLast);
+        CGContextDrawImage(context, CGRectMake(0,0,64,128), image);
+        CGContextRelease(context); CGColorSpaceRelease(colors);
+        NSUInteger colorful = 0;
+        for (NSUInteger i = 0; i < 64*128; i++) {
+            unsigned char *p = pixels+i*4;
+            if (MAX(p[0], MAX(p[1],p[2]))-MIN(p[0], MIN(p[1],p[2])) > 60) colorful++;
+        }
+        double coverage = colorful/(64.0*128);
+        NSLog(@"CROP_COVERAGE %.3f expected %.2f–%.2f", coverage, minimum, maximum);
+        matched = coverage >= minimum && coverage <= maximum;
+        if (!matched) {
+            XCTestExpectation *frame = [self expectationWithDescription:@"Paused crop refresh"];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [frame fulfill]; });
+            [self waitForExpectationsWithTimeout:3 handler:nil];
+        }
+    }
+    XCTAssertTrue(matched, @"Displayed pixels must match the selected crop mode while paused");
+    XCTAssertTrue(self.app.buttons[@"播放"].exists, @"Changing display mode must keep playback paused");
+}
 - (void)testAutomaticFillAndSavedDisplayMode {
     XCUIElement *movie = self.app.staticTexts[@"黑边竖屏测试.mkv"];
     XCTAssertTrue([movie waitForExistenceWithTimeout:20]);
@@ -397,16 +426,21 @@
     }
     CGContextRelease(context); CGColorSpaceRelease(colors); free(pixels);
     XCTAssertGreaterThan((double)colorful/sampled, 0.35);
+    [self waitForPictureCoverageFrom:.4 to:.7];
+    double pausedTime = [self displayedPlaybackSeconds];
     [self capture:@"smart-vertical-fit"];
     [fit tap];
     [self capture:@"smart-display-menu"];
     [self.app.buttons[@"裁切铺满"] tap];
     XCTAssertEqualObjects(fit.value, @"裁切铺满");
+    [self waitForPictureCoverageFrom:.7 to:1];
     [self capture:@"smart-vertical-fill"];
     [fit tap];
     [self.app.buttons[@"完整显示"] tap];
     XCTAssertEqualObjects(fit.value, @"完整显示");
-    [self capture:@"vertical-full-frame"];
+    [self waitForPictureCoverageFrom:0 to:.12];
+    XCTAssertLessThan(fabs([self displayedPlaybackSeconds]-pausedTime), 1.1);
+    [self capture:@"smart-vertical-full"];
     [self closePlayback];
     [movie tap];
     XCTAssertTrue([fit waitForExistenceWithTimeout:20]);
