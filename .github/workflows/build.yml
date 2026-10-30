@@ -1,6 +1,11 @@
 name: Build unsigned IPA
 on:
   workflow_dispatch:
+    inputs:
+      focused:
+        description: 'Run display-mode UI checks and all unit/audio tests'
+        type: boolean
+        default: false
   push:
     branches: [main]
 permissions:
@@ -112,7 +117,15 @@ jobs:
               raise RuntimeError('Fixture preparation timed out')
           PY
           set -o pipefail
-          xcodebuild -workspace LanCinema.xcworkspace -scheme LanCinema \
+          TEST_SELECTION=()
+          if [ '${{ inputs.focused }}' = 'true' ]; then
+            TEST_SELECTION=(
+              '-only-testing:LanCinemaUITests/PlaybackTests/testAutomaticFillAndSavedDisplayMode'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testSmartCropKeepsSubtitlesVisible'
+              '-only-testing:LanCinemaTests'
+            )
+          fi
+          xcodebuild -workspace LanCinema.xcworkspace -scheme LanCinema "${TEST_SELECTION[@]}" \
             -configuration Debug -destination "platform=iOS Simulator,id=$LC_SIMULATOR_ID" \
             -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
             -maximum-test-execution-time-allowance 180 \

@@ -64,6 +64,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 @property(nonatomic, strong) NSDictionary *detectedCrop;
 @property(nonatomic, strong) NSURLSessionDataTask *cropTask;
 @property(nonatomic, copy) NSString *appliedGeometry;
+@property(nonatomic) BOOL hasConfiguredCrop;
 @property(nonatomic, strong) UIView *header;
 @property(nonatomic, strong) UIStackView *footer;
 @property(nonatomic, strong) UILabel *statusLabel;
@@ -423,6 +424,10 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     NSString *geometry = LCVideoCropGeometry(mode, video, self.canvas.bounds.size, self.detectedCrop, sar, upright);
     if (![geometry isEqualToString:self.appliedGeometry]) {
         self.appliedGeometry = geometry;
+        // Fresh outputs already fit the uncropped source. Avoid reallocating
+        // GL buffers during first audio/video startup when there is no crop.
+        if (geometry.length == 0 && !self.hasConfiguredCrop) return;
+        self.hasConfiguredCrop = YES;
         self.player.videoCropGeometry = (char *)geometry.UTF8String;
         __weak typeof(self) owner = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC/5), dispatch_get_main_queue(), ^{
