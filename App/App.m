@@ -362,15 +362,6 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     self.statusLabel.text = @"正在打开视频…";
     if ([self isTransportStream]) [self prepareTransportStream];
     else [self.player play];
-    NSMutableURLRequest *cropRequest = [NSMutableURLRequest requestWithURL:ServiceURL(@"/api/crop", self.item[@"path"])];
-    cropRequest.timeoutInterval = 30;
-    __weak typeof(self) cropOwner = self;
-    self.cropTask = [NSURLSession.sharedSession dataTaskWithRequest:cropRequest completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        NSDictionary *crop = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
-        if ([(NSHTTPURLResponse *)response statusCode] != 200 || ![crop isKindOfClass:NSDictionary.class]) return;
-        dispatch_async(dispatch_get_main_queue(), ^{ if (!cropOwner.closed) { cropOwner.detectedCrop = crop; [cropOwner updateVideoLayout]; } });
-    }];
-    [self.cropTask resume];
     __weak typeof(self) weakSelf = self;
     self.timer = [NSTimer timerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *timer) { [weakSelf tick]; }];
     [NSRunLoop.mainRunLoop addTimer:self.timer forMode:NSRunLoopCommonModes];
@@ -380,6 +371,21 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     UIApplication.sharedApplication.idleTimerDisabled = YES;
 }
 - (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews]; [self updateVideoLayout]; }
+- (void)startCropProbeAfterFirstFrames {
+    if (self.closed || self.cropTask || self.lastDisplayedFrames < 2) return;
+#if DEBUG
+    NSLog(@"CROP_PROBE starts after %ld displayed frames", (long)self.lastDisplayedFrames);
+#endif
+    NSMutableURLRequest *cropRequest = [NSMutableURLRequest requestWithURL:ServiceURL(@"/api/crop", self.item[@"path"])];
+    cropRequest.timeoutInterval = 30;
+    __weak typeof(self) cropOwner = self;
+    self.cropTask = [NSURLSession.sharedSession dataTaskWithRequest:cropRequest completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        NSDictionary *crop = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        if ([(NSHTTPURLResponse *)response statusCode] != 200 || ![crop isKindOfClass:NSDictionary.class]) return;
+        dispatch_async(dispatch_get_main_queue(), ^{ if (!cropOwner.closed) { cropOwner.detectedCrop = crop; [cropOwner updateVideoLayout]; } });
+    }];
+    [self.cropTask resume];
+}
 - (NSString *)displayMode {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     NSString *mode = [defaults stringForKey:@"videoDisplayMode"];
@@ -404,7 +410,10 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     if (!self.player || self.closed) return;
     NSString *mode = self.displayMode;
     self.fitButton.accessibilityValue = [@{@"smart":@"智能适配", @"fill":@"裁切铺满", @"full":@"完整显示"} objectForKey:mode];
-    self.videoSurface.frame = self.canvas.bounds;
+    if (!CGRectEqualToRect(self.videoSurface.frame, self.canvas.bounds)) self.videoSurface.frame = self.canvas.bounds;
+    // Opening needs the decoder and audio clock first. Query track geometry and
+    // change the render viewport only after actual video frames have arrived.
+    if (self.lastDisplayedFrames < 2) return;
     if (!self.player.hasVideoOut) { self.appliedGeometry = nil; return; }
     CGSize video = self.player.videoSize;
     double sar = 1;
@@ -628,6 +637,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     if (self.waitingForSeekFrames && displayed > self.seekFrameBaseline + 2 && fabs(actualTime - self.pendingSeekTime) < 8) self.waitingForSeekFrames = NO;
     if (!self.waitingForSeekFrames && displayed > self.lastDisplayedFrames) self.lastPlayableTime = actualTime;
     self.lastDisplayedFrames = displayed;
+    [self startCropProbeAfterFirstFrames];
     self.slider.enabled = self.player.isSeekable && duration > 0;
     self.gestureSurface.accessibilityValue = [NSString stringWithFormat:@"%@ / %@", ClockText([self currentPlaybackTime]), ClockText(duration)];
     if (!self.scrubbing && !self.panning) {
