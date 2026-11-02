@@ -11,7 +11,7 @@ from PySide6.QtGui import QIcon, QPixmap, QImage, QAction, QFont
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QCheckBox, QFileDialog, QComboBox, QSystemTrayIcon,
-    QMenu, QMessageBox, QGroupBox)
+    QMenu, QMessageBox, QGroupBox, QListWidget, QListWidgetItem, QScrollArea, QFrame, QLayout)
 import qrcode
 from zeroconf import Zeroconf, ServiceInfo, IPVersion
 from desktop_core import load_settings, save_settings, validate, set_autostart, config_path, connection_qr
@@ -44,7 +44,7 @@ class Service:
             self.http = None
 
     def start(self, settings):
-        self.http = MediaServer(('0.0.0.0', 8123), settings['root'], settings['password'])
+        self.http = MediaServer(('0.0.0.0', 8123), settings.get('roots', settings['root']), settings['password'])
         threading.Thread(target=self.http.serve_forever, daemon=True).start()
         self.settings = settings
         self.advertise()
@@ -78,6 +78,10 @@ class ApplyWorker(QThread):
         old = self.service.settings
         try:
             checked = validate(self.settings)
+        except Exception as error:
+            self.finished_apply.emit(None, str(error))
+            return
+        try:
             self.service.stop()
             self.service.start(checked)
             if self.persist:
@@ -107,15 +111,21 @@ class Window(QMainWindow):
         self.service = Service()
         self.worker = None
         self.setWindowTitle('局域影院 · 电脑端')
-        self.setMinimumSize(760, 600)
-        self.resize(860, 670)
+        self.setMinimumSize(760, 700)
+        self.resize(900, 760)
         asset = Path(getattr(sys, '_MEIPASS', Path(__file__).parent)) / 'app.ico'
         self.setWindowIcon(QIcon(str(asset)))
         content = QWidget()
-        self.setCentralWidget(content)
+        content.setObjectName('desktopContent')
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(content)
+        self.setCentralWidget(scroll)
         layout = QVBoxLayout(content)
+        layout.setSizeConstraint(QLayout.SetMinimumSize)
         layout.setContentsMargins(32, 28, 32, 24)
-        layout.setSpacing(16)
+        layout.setSpacing(14)
         title = QLabel('局域影院')
         title.setObjectName('title')
         layout.addWidget(title)
@@ -131,22 +141,36 @@ class Window(QMainWindow):
         layout.addLayout(columns, 1)
         settings_group = QGroupBox('共享设置')
         form = QVBoxLayout(settings_group)
-        form.setSpacing(12)
+        form.setSpacing(10)
         folder_label = QLabel('共享文件夹')
         form.addWidget(folder_label)
-        self.folder = QLineEdit(settings['root'])
-        self.folder.setAccessibleName('共享文件夹')
-        folder_label.setBuddy(self.folder)
-        form.addWidget(self.folder)
-        self.folder_full = QLabel(settings['root'])
-        self.folder_full.setWordWrap(True)
-        self.folder_full.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.folder_full.setObjectName('secondary')
-        form.addWidget(self.folder_full)
-        self.folder.textChanged.connect(self.folder_full.setText)
-        choose = QPushButton('选择文件夹…')
-        choose.clicked.connect(self.choose_folder)
-        form.addWidget(choose)
+        self.folders = QListWidget()
+        self.folders.setAccessibleName('共享文件夹列表')
+        self.folders.setWordWrap(True)
+        self.folders.setTextElideMode(Qt.ElideNone)
+        self.folders.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.folders.setMinimumHeight(108)
+        self.folders.setMaximumHeight(132)
+        folder_label.setBuddy(self.folders)
+        form.addWidget(self.folders)
+        folder_actions = QHBoxLayout()
+        self.add_folder_button = QPushButton('添加文件夹…')
+        self.add_folder_button.clicked.connect(self.choose_folder)
+        folder_actions.addWidget(self.add_folder_button)
+        self.remove_folder_button = QPushButton('移除所选')
+        self.remove_folder_button.clicked.connect(self.remove_folder)
+        folder_actions.addWidget(self.remove_folder_button)
+        form.addLayout(folder_actions)
+        self.folder_hint = QLabel()
+        self.folder_hint.setWordWrap(True)
+        self.folder_hint.setObjectName('secondary')
+        form.addWidget(self.folder_hint)
+        self.folders.currentRowChanged.connect(self.update_folder_state)
+        for root in settings.get('roots', [settings.get('root', r'G:\123')]):
+            self.add_folder(root)
+        self.folders.setCurrentRow(0)
+        self.folders.scrollToTop()
+        self.update_folder_state()
         password_label = QLabel('连接密码（至少 8 位）')
         form.addWidget(password_label)
         self.password = QLineEdit(settings['password'])
@@ -208,7 +232,7 @@ class Window(QMainWindow):
         if not preview:
             QTimer.singleShot(0, self.apply)
         else:
-            self.status.setText('共享已开启 · 设置已保存')
+            self.status.setText(f'共享已开启 · {self.folders.count()} 个文件夹')
         self.network_timer = QTimer(self)
         self.network_timer.timeout.connect(self.refresh_network)
         if not preview:
@@ -220,14 +244,41 @@ class Window(QMainWindow):
         self.activateWindow()
 
     def choose_folder(self):
-        value = QFileDialog.getExistingDirectory(self, '选择共享文件夹', self.folder.text())
+        selected = self.folders.currentItem()
+        initial = selected.data(Qt.UserRole) if selected else str(Path.home())
+        value = QFileDialog.getExistingDirectory(self, '添加共享文件夹（可选择任意盘符）', initial)
         if value:
-            self.folder.setText(value)
+            self.add_folder(value)
+
+    def add_folder(self, value):
+        value = str(Path(value).resolve())
+        for index in range(self.folders.count()):
+            if Path(self.folders.item(index).data(Qt.UserRole)) == Path(value):
+                self.folders.setCurrentRow(index)
+                return
+        item = QListWidgetItem(value)
+        item.setData(Qt.UserRole, value)
+        item.setToolTip(value)
+        self.folders.addItem(item)
+        self.folders.setCurrentItem(item)
+        self.update_folder_state()
+
+    def remove_folder(self):
+        row = self.folders.currentRow()
+        if row >= 0:
+            self.folders.takeItem(row)
+        self.update_folder_state()
+
+    def update_folder_state(self, *_):
+        self.remove_folder_button.setEnabled(self.folders.currentRow() >= 0)
+        self.folder_hint.setText('可继续添加其他盘符的文件夹。移除仅取消共享。' if self.folders.count()
+                                 else '尚未添加文件夹，请至少添加一个后保存。')
 
     def apply(self):
         if self.worker and self.worker.isRunning():
             return
-        proposed = {'root': self.folder.text().strip(), 'password': self.password.text(), 'autostart': self.autostart.isChecked()}
+        proposed = {'roots': [self.folders.item(i).data(Qt.UserRole) for i in range(self.folders.count())],
+                    'password': self.password.text(), 'autostart': self.autostart.isChecked()}
         self.save.setEnabled(False)
         self.status.setText('正在应用设置…')
         self.worker = ApplyWorker(self.service, proposed)
@@ -242,7 +293,7 @@ class Window(QMainWindow):
             self.show_window()
         else:
             self.settings = settings
-            self.status.setText('共享已开启 · 设置已保存')
+            self.status.setText(f'共享已开启 · {len(settings["roots"])} 个文件夹 · 设置已保存')
             self.update_qr()
 
     def update_qr(self):
@@ -288,7 +339,7 @@ class Window(QMainWindow):
 
 STYLE = '''
 QWidget { font-family: "Microsoft YaHei UI"; font-size: 14px; color: #192b30; }
-QMainWindow { background: #f6f8f8; }
+QMainWindow, QWidget#desktopContent { background: #f6f8f8; }
 QLabel#title { font-size: 28px; font-weight: 600; }
 QLabel#secondary { color: #52656a; font-size: 13px; }
 QLabel#status { color: #006c62; font-weight: 600; padding: 8px 0; }
@@ -296,6 +347,10 @@ QGroupBox { background: white; border: 1px solid #d4dfe0; border-radius: 8px; ma
 QGroupBox::title { subcontrol-origin: margin; left: 16px; padding: 0 4px; font-weight: 600; }
 QLineEdit, QComboBox { border: 1px solid #899fa4; border-radius: 5px; padding: 8px; background: white; selection-background-color: #007f75; }
 QLineEdit:focus, QComboBox:focus { border: 2px solid #007f75; padding: 7px; }
+QListWidget { border: 1px solid #899fa4; border-radius: 5px; background: white; }
+QListWidget:focus { border: 2px solid #007f75; }
+QListWidget::item { padding: 9px 8px; }
+QListWidget::item:selected { background: #d7eae6; color: #192b30; }
 QPushButton { min-height: 24px; padding: 8px 16px; border: 1px solid #899fa4; border-radius: 5px; background: white; }
 QPushButton:hover { background: #edf6f4; }
 QPushButton:pressed { background: #d7eae6; }

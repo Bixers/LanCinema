@@ -76,7 +76,7 @@ jobs:
       - name: Run server checks
         run: |
           python3 -m pip install --break-system-packages imageio-ffmpeg
-          cd server && python3 -m unittest -v test_server.py test_video_probe.py test_playback_cache.py
+          cd server && python3 -m unittest -v test_server.py test_multi_root.py test_video_probe.py test_playback_cache.py
       - name: Boot simulator
         timeout-minutes: 6
         run: |

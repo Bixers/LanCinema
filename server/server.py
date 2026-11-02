@@ -14,6 +14,7 @@ import unicodedata
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 from playback_cache import PlaybackCache, TRANSPORT_STREAMS
+from shared_library import normalize_roots, mount_names
 
 ROOT = Path(r"G:\123")
 VIDEO = {'.mp4', '.mkv', '.avi', '.mov', '.m4v', '.webm', '.wmv', '.flv', '.ts', '.m2ts', '.mts', '.mpg', '.mpeg', '.vob', '.3gp', '.ogv', '.rm', '.rmvb', '.asf', '.divx'}
@@ -25,9 +26,13 @@ class MediaServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
     def __init__(self, address, root, token):
-        self.root = Path(root).resolve(strict=True)
+        self.roots = normalize_roots(root)
+        self.root = self.roots[0]
+        self.mounts = mount_names(self.roots) if len(self.roots) > 1 else {}
+        self.root_label = f'共享文件夹（{len(self.roots)} 个）' if self.mounts else str(self.root)
         self.token = token
-        self.library_id = hashlib.sha256(str(self.root).encode()).hexdigest()[:16]
+        identity = json.dumps(sorted(str(p) for p in self.roots), ensure_ascii=False) if self.mounts else str(self.root)
+        self.library_id = hashlib.sha256(identity.encode()).hexdigest()[:16]
         self.playback_cache = PlaybackCache()
         super().__init__(address, Handler)
 
@@ -59,28 +64,37 @@ class Handler(BaseHTTPRequestHandler):
     def error(self, status, message, extra=None):
         self.reply(status, json.dumps({'error': message}, ensure_ascii=False).encode(), extra=extra)
 
-    def resolve(self, value):
+    def scope(self, value):
         # Only root-relative POSIX paths; reject Windows drive and ADS syntax.
         if '\\' in value or ':' in value or '\0' in value or value.startswith('/'):
             raise PermissionError()
         if any(piece in ('.', '..') for piece in value.split('/')):
             raise PermissionError()
-        path = (self.server.root / value).resolve(strict=True)
-        if os.path.commonpath([self.server.root, path]) != str(self.server.root):
+        if self.server.mounts:
+            name, _, relative = value.partition('/')
+            if name not in self.server.mounts:
+                raise FileNotFoundError()
+            return self.server.mounts[name], name + '/', relative
+        return self.server.root, '', value
+
+    def resolve(self, value):
+        root, _, relative = self.scope(value)
+        path = (root / relative).resolve(strict=True)
+        if not path.is_relative_to(root):
             raise PermissionError()
         return path
 
-    def describe(self, entry, checked):
+    def describe(self, entry, checked, root, prefix):
         directory = checked.is_dir()
         if not directory and not checked.is_file():
             return None
         metadata = checked.stat()
-        return {'name': entry.name, 'path': entry.relative_to(self.server.root).as_posix(),
+        return {'name': entry.name, 'path': prefix + entry.relative_to(root).as_posix(),
                 'directory': directory, 'size': 0 if directory else metadata.st_size,
                 'modified': metadata.st_mtime,
                 'video': entry.suffix.lower() in VIDEO, 'subtitle': entry.suffix.lower() in SUBTITLES}
 
-    def search(self, start, keyword):
+    def search(self, start, keyword, root, prefix):
         """Visit every readable descendant, without following cycles or escaping the search scope."""
         needle = unicodedata.normalize('NFKC', keyword).casefold()
         pending, visited, results, skipped = [start], set(), [], 0
@@ -96,13 +110,13 @@ class Handler(BaseHTTPRequestHandler):
                     for entry in entries:
                         try:
                             lexical = Path(entry.path)
-                            checked = self.resolve(lexical.relative_to(self.server.root).as_posix())
+                            checked = self.resolve(prefix + lexical.relative_to(root).as_posix())
                             # Junctions and symlinks cannot broaden a subfolder search to siblings.
                             checked.relative_to(start)
                             if checked.is_dir():
                                 pending.append(lexical)
                             if needle in unicodedata.normalize('NFKC', entry.name).casefold():
-                                item = self.describe(lexical, checked)
+                                item = self.describe(lexical, checked, root, prefix)
                                 if item is not None:
                                     results.append(item)
                         except (OSError, ValueError):
@@ -123,10 +137,34 @@ class Handler(BaseHTTPRequestHandler):
             if not hmac.compare_digest(token.encode(), self.server.token.encode()):
                 return self.error(401, '访问码不正确')
             if route.path == '/api/info':
-                return self.reply(200, json.dumps({'name': socket.gethostname(), 'root': str(self.server.root), 'libraryID': self.server.library_id}, ensure_ascii=False).encode())
+                return self.reply(200, json.dumps({'name': socket.gethostname(), 'root': self.server.root_label, 'libraryID': self.server.library_id}, ensure_ascii=False).encode())
             if route.path not in ('/api/list', '/api/search', '/api/crop', '/api/playback', '/media'):
                 return self.error(404, '接口不存在')
             relative = query.get('path', [''])[0]
+            if not relative and self.server.mounts:
+                if route.path not in ('/api/list', '/api/search'):
+                    return self.error(400, '请选择文件')
+                keyword = query.get('q', [''])[0].strip()
+                if route.path == '/api/search' and not keyword:
+                    return self.error(400, '请输入搜索关键词')
+                items, skipped = [], 0
+                needle = unicodedata.normalize('NFKC', keyword).casefold()
+                for name, root in self.server.mounts.items():
+                    try:
+                        modified = root.stat().st_mtime
+                    except OSError:
+                        modified = 0
+                    if route.path == '/api/list' or needle in unicodedata.normalize('NFKC', name).casefold():
+                        items.append({'name': name, 'path': name, 'directory': True,
+                                      'size': 0, 'modified': modified, 'video': False, 'subtitle': False})
+                    if route.path == '/api/search':
+                        found, failures = self.search(root, keyword, root, name + '/')
+                        items.extend(found)
+                        skipped += failures
+                items.sort(key=lambda item: (not item['directory'], item['name'].casefold(), item['path'].casefold()))
+                return self.reply(200, json.dumps({'path': '', 'items': items, 'skipped': skipped,
+                    'root': self.server.root_label, 'libraryID': self.server.library_id}, ensure_ascii=False).encode())
+            root, prefix, _ = self.scope(relative)
             path = self.resolve(relative)
             if route.path == '/api/playback':
                 if not path.is_file() or path.suffix.lower() not in TRANSPORT_STREAMS:
@@ -143,23 +181,23 @@ class Handler(BaseHTTPRequestHandler):
                 keyword = query.get('q', [''])[0].strip()
                 if not keyword:
                     return self.error(400, '请输入搜索关键词')
-                items, skipped = self.search(path, keyword)
-                return self.reply(200, json.dumps({'path': relative, 'items': items, 'skipped': skipped, 'root': str(self.server.root), 'libraryID': self.server.library_id}, ensure_ascii=False).encode())
+                items, skipped = self.search(path, keyword, root, prefix)
+                return self.reply(200, json.dumps({'path': relative, 'items': items, 'skipped': skipped, 'root': self.server.root_label, 'libraryID': self.server.library_id}, ensure_ascii=False).encode())
             if route.path == '/api/list':
                 if not path.is_dir():
                     return self.error(400, '不是文件夹')
                 items = []
                 for entry in path.iterdir():
                     try:
-                        rel = entry.relative_to(self.server.root).as_posix()
+                        rel = prefix + entry.relative_to(root).as_posix()
                         checked = self.resolve(rel)
-                        item = self.describe(entry, checked)
+                        item = self.describe(entry, checked, root, prefix)
                         if item is not None:
                             items.append(item)
                     except (OSError, ValueError):
                         continue
                 items.sort(key=lambda item: (not item['directory'], item['name'].casefold()))
-                return self.reply(200, json.dumps({'path': relative, 'items': items, 'root': str(self.server.root), 'libraryID': self.server.library_id}, ensure_ascii=False).encode())
+                return self.reply(200, json.dumps({'path': relative, 'items': items, 'root': self.server.root_label, 'libraryID': self.server.library_id}, ensure_ascii=False).encode())
             if not path.is_file():
                 return self.error(404, '不是文件')
             if query.get('prepared', [''])[0] == '1':

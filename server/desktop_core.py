@@ -8,6 +8,7 @@ import secrets
 import sys
 import winreg
 from urllib.parse import urlencode, quote
+from shared_library import normalize_roots
 
 RUN_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
 
@@ -39,19 +40,18 @@ def config_path():
 def load_settings(path=None):
     path = path or config_path()
     if not path.exists():
-        return {'root': r'G:\123', 'password': secrets.token_urlsafe(9), 'autostart': True}
+        return {'root': r'G:\123', 'roots': [r'G:\123'], 'password': secrets.token_urlsafe(9), 'autostart': True}
     raw = json.loads(path.read_text(encoding='utf-8'))
     raw['password'] = crypt(base64.b64decode(raw.pop('protected_password')), decrypt=True).decode('utf-8')
+    raw.setdefault('roots', [raw.get('root', r'G:\123')])
     return raw
 
 
 def validate(settings):
-    root = Path(settings['root']).resolve(strict=True)
-    if not root.is_dir():
-        raise ValueError('请选择一个文件夹。')
+    roots = normalize_roots(settings.get('roots', settings.get('root', r'G:\123')))
     if not 8 <= len(settings['password']) <= 128:
         raise ValueError('连接密码需要 8～128 个字符。')
-    return dict(settings, root=str(root))
+    return dict(settings, root=str(roots[0]), roots=[str(root) for root in roots])
 
 
 def save_settings(settings, path=None):

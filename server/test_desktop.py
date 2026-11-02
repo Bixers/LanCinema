@@ -53,7 +53,15 @@ class DesktopTests(unittest.TestCase):
             window.password.selectAll()
             QTest.keyClicks(window.password, 'new-password')
             QTest.mouseClick(window.autostart, Qt.LeftButton)
-            window.folder.setText(temp)
+            extra = Path(temp) / 'other'
+            extra.mkdir()
+            with patch('desktop.QFileDialog.getExistingDirectory', return_value=str(extra)):
+                QTest.mouseClick(window.add_folder_button, Qt.LeftButton)
+                QTest.mouseClick(window.add_folder_button, Qt.LeftButton)
+            self.assertEqual(window.folders.count(), 2)
+            QTest.mouseClick(window.remove_folder_button, Qt.LeftButton)
+            self.assertEqual(window.folders.count(), 1)
+            window.add_folder(str(extra))
             with patch('desktop.save_settings') as save, patch('desktop.MediaServer', side_effect=lambda addr, root, token: MediaServer(('127.0.0.1', 0), root, token)):
                 window.apply()
                 for _ in range(200):
@@ -64,8 +72,36 @@ class DesktopTests(unittest.TestCase):
                 self.assertEqual(save.call_args.args[0]['password'], 'new-password')
                 self.assertTrue(save.call_args.args[0]['autostart'])
                 self.assertEqual(window.service.http.root, Path(temp).resolve())
+                self.assertEqual(save.call_args.args[0]['roots'], [str(Path(temp).resolve()), str(extra.resolve())])
+                self.assertEqual(len(window.service.http.mounts), 2)
             window.service.stop()
             window.close()
+
+    def test_old_settings_migrate_and_multiple_roots_survive_restart(self):
+        with tempfile.TemporaryDirectory() as temp:
+            file = Path(temp) / 'settings.json'
+            old = {'root': temp, 'password': 'old-password', 'autostart': False}
+            save_settings(old, file)
+            loaded = load_settings(file)
+            self.assertEqual(loaded['roots'], [temp])
+            second = Path(temp) / 'second'
+            second.mkdir()
+            loaded['roots'] = [temp, str(second), temp]
+            checked = validate(loaded)
+            self.assertEqual(len(checked['roots']), 2)
+            save_settings(checked, file)
+            self.assertEqual(load_settings(file), checked)
+            with self.assertRaises(ValueError):
+                validate(dict(checked, roots=[]))
+
+    def test_invalid_folder_keeps_running_service(self):
+        from desktop import ApplyWorker
+        from unittest.mock import Mock
+        service = Mock()
+        worker = ApplyWorker(service, {'roots': [], 'password': 'password123', 'autostart': False})
+        worker.run()
+        service.stop.assert_not_called()
+        service.start.assert_not_called()
 
 
 if __name__ == '__main__':
