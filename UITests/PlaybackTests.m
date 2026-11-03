@@ -194,8 +194,13 @@
     [folder tap];
     [self.app.staticTexts[@"时间戳偏移测试.ts"] tap];
     [self waitForPlaybackSecondsFrom:1 to:50];
-    [self showPlayerControls];
-    XCTAssertTrue(self.app.sliders[@"播放进度"].enabled);
+    // The real auto-hide test starts by waiting for hidden controls. Snapshot
+    // calls can consume its four-second timer, so inspect enabled state only
+    // in the other tests that deliberately keep the controls visible.
+    if (![self.name containsString:@"testControlsAutoHideAndTapToggle"]) {
+        [self showPlayerControls];
+        XCTAssertTrue(self.app.sliders[@"播放进度"].enabled);
+    }
 }
 - (void)testControlsAutoHideAndTapToggle {
     [self openTransportStream];
@@ -220,6 +225,7 @@
     [center tap];
     [self waitForControlsVisible:YES];
     XCTAssertTrue(self.app.buttons[@"播放"].exists);
+    XCTAssertTrue(self.app.sliders[@"播放进度"].enabled);
     [self capture:@"controls-tap-revealed"];
     [self closePlayback];
 }
