@@ -19,7 +19,7 @@
     [super tearDown];
 }
 - (void)capture:(NSString *)name {
-    XCTAttachment *a = [XCTAttachment attachmentWithScreenshot:self.app.screenshot];
+    XCTAttachment *a = [XCTAttachment attachmentWithScreenshot:XCUIScreen.mainScreen.screenshot];
     a.name = name;
     a.lifetime = XCTAttachmentLifetimeKeepAlways;
     [self addAttachment:a];
@@ -235,6 +235,9 @@
         }];
         [self expectationForPredicate:compact evaluatedWithObject:footer handler:nil];
         [self waitForExpectationsWithTimeout:10 handler:nil];
+        XCTestExpectation *rotation = [self expectationWithDescription:@"Rotation compositor settled"];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2*NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [rotation fulfill]; });
+        [self waitForExpectationsWithTimeout:4 handler:nil];
         XCTAssertLessThan(footer.frame.size.height, portraitHeight * .65);
         for (NSString *label in @[@"关闭播放器", @"播放", @"后退十秒", @"前进十秒", @"播放倍速", @"字幕和音轨"])
             XCTAssertTrue(self.app.buttons[label].isHittable, @"%@ must remain accessible", label);

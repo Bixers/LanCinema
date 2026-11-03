@@ -9,8 +9,12 @@
 
 // Public libvlc frame-step API; use the same owning-player bridge as audio.
 extern void libvlc_media_player_next_frame(void *);
+extern int libvlc_media_slaves_add(void *, int, unsigned, const char *);
 @interface VLCMediaPlayer (LCVideoBridge)
 - (void *)libVLCMediaPlayer;
+@end
+@interface VLCMedia (LCSubtitleBridge)
+- (void *)libVLCMediaDescriptor;
 @end
 
 static NSString *const HostKey = @"computerHost";
@@ -139,6 +143,12 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     // Retain a small jitter buffer for seekable local HTTP media.
     [media addOption:@":network-caching=300"];
     [media addOption:@":audio-time-stretch"];
+    if (self.selectedExternalSubtitle) {
+        // Register the subtitle before input startup/seeking. Attaching it only
+        // after Playing can miss a cue that starts before the resumed position.
+        NSURL *subtitleURL = ServiceURL(@"/media", self.selectedExternalSubtitle);
+        libvlc_media_slaves_add(media.libVLCMediaDescriptor, 0, 4, subtitleURL.absoluteString.UTF8String);
+    }
     // Select the resume point before input/audio output start. Starting at zero
     // and seeking from tick interrupted the first audio and buffered twice.
     self.restored = YES;
@@ -778,9 +788,13 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     if (++self.ticks % 20 == 0) [self saveProgress];
 }
 - (void)mediaPlayerStateChanged:(NSNotification *)notification {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.closed) return;
-        switch (self.player.state) {
+    // Ended can be followed immediately by Stopped. Capture the notification's
+    // state now, not after another main-queue turn, and reject old input events.
+    VLCMediaPlayerState state = self.player.state;
+    VLCMedia *eventMedia = self.player.media;
+    void (^update)(void) = ^{
+        if (self.closed || self.player.media != eventMedia) return;
+        switch (state) {
             case VLCMediaPlayerStatePlaying:
                 self.restartingPlayback = NO;
                 self.playbackEnded = NO;
@@ -791,8 +805,6 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
                     self.restoreTracksOnPlay = NO;
                     if (self.selectedAudioTrack) self.player.currentAudioTrackIndex = self.selectedAudioTrack.intValue;
                     if (self.selectedSubtitleTrack) self.player.currentVideoSubTitleIndex = self.selectedSubtitleTrack.intValue;
-                    if (self.selectedExternalSubtitle)
-                        [self.player addPlaybackSlave:ServiceURL(@"/media", self.selectedExternalSubtitle) type:VLCMediaPlaybackSlaveTypeSubtitle enforce:YES];
                 }
                 break;
             case VLCMediaPlayerStateOpening: self.statusLabel.hidden = NO; self.statusLabel.text = @"正在打开视频…"; break;
@@ -805,7 +817,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
                 if (!self.controlsVisible) [self toggleControls];
                 break;
             case VLCMediaPlayerStateEnded:
-                if (self.restartingPlayback) break;
+                self.restartingPlayback = NO;
                 [self duration];
                 self.playbackEnded = YES;
                 self.hasPendingSeek = NO;
@@ -820,7 +832,9 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
             case VLCMediaPlayerStatePaused: self.statusLabel.text = @"已暂停"; self.statusLabel.hidden = !self.controlsVisible; break;
             default: break;
         }
-    });
+    };
+    if (NSThread.isMainThread) update();
+    else dispatch_async(dispatch_get_main_queue(), update);
 }
 - (void)mediaPlayerTimeChanged:(NSNotification *)notification {
     dispatch_async(dispatch_get_main_queue(), ^{
