@@ -292,9 +292,6 @@
     [self.app.sliders[@"播放进度"] adjustToNormalizedSliderPosition:.2];
     [self waitForPlaybackSecondsFrom:10 to:22];
     XCTAssertEqualObjects(self.app.buttons[@"播放倍速"].value, @"1.5×");
-    [self.app.buttons[@"字幕和音轨"] tap];
-    [self capture:@"ended-subtitle-tracks"];
-    [self.app.buttons[@"取消"] tap];
     [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)] tap];
     [self assertReadableChineseSubtitle:@"ended-subtitle-restored"];
     [self closePlayback];

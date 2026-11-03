@@ -9,6 +9,7 @@
 
 // Public libvlc frame-step API; use the same owning-player bridge as audio.
 extern void libvlc_media_player_next_frame(void *);
+extern void libvlc_media_player_stop(void *);
 @interface VLCMediaPlayer (LCVideoBridge)
 - (void *)libVLCMediaPlayer;
 @end
@@ -951,9 +952,21 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     [self.timer invalidate];
     self.timer = nil;
     self.player.delegate = nil;
-    [self.player stop];
     [self.audioOutput shutdown];
-    self.player.drawable = nil;
+    // VLCKit 3.7.2's -stop returns before native decoding callbacks finish.
+    // Keep their targets alive and stop synchronously off the UI thread before
+    // releasing the drawable. A quick dismissal/reopen must not free them early.
+    VLCMediaPlayer *stoppingPlayer = self.player;
+    LCAudioOutput *stoppingAudio = self.audioOutput;
+    UIView *stoppingSurface = self.videoSurface;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        libvlc_media_player_stop(stoppingPlayer.libVLCMediaPlayer);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            stoppingPlayer.drawable = nil;
+            [stoppingSurface removeFromSuperview];
+            [stoppingAudio shutdown];
+        });
+    });
     [NSNotificationCenter.defaultCenter removeObserver:self];
     UIApplication.sharedApplication.idleTimerDisabled = NO;
     [[AVAudioSession sharedInstance] setActive:NO withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
