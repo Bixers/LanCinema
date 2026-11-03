@@ -223,6 +223,76 @@
     [self capture:@"controls-tap-revealed"];
     [self closePlayback];
 }
+- (void)testCompactLandscapeControlsAndRotation {
+    [self openTransportStream];
+    [self.app.buttons[@"暂停"] tap];
+    CGFloat portraitHeight = self.app.otherElements[@"playerFooter"].frame.size.height;
+    for (NSNumber *orientation in @[@(UIDeviceOrientationLandscapeLeft), @(UIDeviceOrientationLandscapeRight)]) {
+        XCUIDevice.sharedDevice.orientation = orientation.integerValue;
+        XCUIElement *footer = self.app.otherElements[@"playerFooter"];
+        NSPredicate *compact = [NSPredicate predicateWithBlock:^BOOL(XCUIElement *element, NSDictionary *bindings) {
+            return element.exists && element.frame.size.width > 500 && element.frame.size.height <= 60;
+        }];
+        [self expectationForPredicate:compact evaluatedWithObject:footer handler:nil];
+        [self waitForExpectationsWithTimeout:10 handler:nil];
+        XCTAssertLessThan(footer.frame.size.height, portraitHeight * .65);
+        for (NSString *label in @[@"关闭播放器", @"播放", @"后退十秒", @"前进十秒", @"播放倍速", @"字幕和音轨"])
+            XCTAssertTrue(self.app.buttons[label].isHittable, @"%@ must remain accessible", label);
+        XCTAssertGreaterThan(self.app.sliders[@"播放进度"].frame.size.width, 120);
+        [self capture:orientation.integerValue == UIDeviceOrientationLandscapeLeft ? @"compact-landscape-left" : @"compact-landscape-right"];
+    }
+    [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)] tap];
+    [self waitForControlsVisible:NO];
+    XCTAssertFalse(self.app.staticTexts[@"已暂停"].exists);
+    [self capture:@"compact-paused-clean-picture"];
+    [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)] tap];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationPortrait;
+    [self waitForControlsVisible:YES];
+    XCTAssertGreaterThan(self.app.otherElements[@"playerFooter"].frame.size.height, 80);
+    [self closePlayback];
+}
+- (void)finishCurrentVideo {
+    [self showPlayerControls];
+    [self.app.sliders[@"播放进度"] adjustToNormalizedSliderPosition:1];
+    XCTAssertTrue([self.app.buttons[@"重新播放"] waitForExistenceWithTimeout:15]);
+    XCTAssertTrue(self.app.sliders[@"播放进度"].enabled);
+    [self capture:@"ended-seekable-timeline"];
+}
+- (void)testSeekAndReplayAfterVideoEnds {
+    [self openTransportStream];
+    [self finishCurrentVideo];
+    [self.app.sliders[@"播放进度"] adjustToNormalizedSliderPosition:.3];
+    [self waitForPlaybackSecondsFrom:15 to:25];
+    [self assertVideoFramesAdvance:@"ended-slider-recovered-video"];
+    [self finishCurrentVideo];
+    XCUICoordinate *right = [self.app coordinateWithNormalizedOffset:CGVectorMake(.75,.5)];
+    XCUICoordinate *left = [self.app coordinateWithNormalizedOffset:CGVectorMake(.25,.5)];
+    [right pressForDuration:.05 thenDragToCoordinate:left];
+    [self waitForPlaybackSecondsFrom:42 to:52];
+    [self assertVideoFramesAdvance:@"ended-pan-recovered-video"];
+    [self finishCurrentVideo];
+    [self.app.buttons[@"重新播放"] tap];
+    [self waitForPlaybackSecondsFrom:1 to:10];
+    [self assertVideoFramesAdvance:@"ended-replay-from-start"];
+    [self closePlayback];
+}
+- (void)testSubtitleAndSpeedSurviveEndRecovery {
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    [self.app.staticTexts[@"演示文件夹"] tap];
+    [self.app.staticTexts[@"字幕字形测试.mkv"] tap];
+    [self waitForPlaybackSecondsFrom:1 to:50];
+    [self.app.buttons[@"字幕和音轨"] tap];
+    [self.app.buttons[@"外挂 · 中文字幕验证.srt"] tap];
+    [self.app.buttons[@"播放倍速"] tap];
+    [self.app.buttons[@"1.5×"] tap];
+    [self finishCurrentVideo];
+    [self.app.sliders[@"播放进度"] adjustToNormalizedSliderPosition:.2];
+    [self waitForPlaybackSecondsFrom:10 to:22];
+    XCTAssertEqualObjects(self.app.buttons[@"播放倍速"].value, @"1.5×");
+    [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)] tap];
+    [self assertReadableChineseSubtitle:@"ended-subtitle-restored"];
+    [self closePlayback];
+}
 - (void)testHorizontalCanvasSeekingWithoutGestureConflicts {
     [self openTransportStream];
     [self.app.buttons[@"暂停"] tap];

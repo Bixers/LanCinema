@@ -67,6 +67,22 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 @property(nonatomic) BOOL hasConfiguredCrop;
 @property(nonatomic, strong) UIView *header;
 @property(nonatomic, strong) UIStackView *footer;
+@property(nonatomic, strong) UIStackView *buttonRow;
+@property(nonatomic, strong) UIButton *backButton;
+@property(nonatomic, strong) UIButton *forwardButton;
+@property(nonatomic, strong) UIButton *tracksButton;
+@property(nonatomic, strong) UIView *buttonSpacer;
+@property(nonatomic, strong) NSLayoutConstraint *headerTop;
+@property(nonatomic, strong) NSLayoutConstraint *footerBottom;
+@property(nonatomic) BOOL compactPlaybackLayout;
+@property(nonatomic) BOOL configuredPlaybackLayout;
+@property(nonatomic) double knownDuration;
+@property(nonatomic) BOOL playbackEnded;
+@property(nonatomic) BOOL restartingPlayback;
+@property(nonatomic) BOOL restoreTracksOnPlay;
+@property(nonatomic, copy) NSString *selectedExternalSubtitle;
+@property(nonatomic, strong) NSNumber *selectedAudioTrack;
+@property(nonatomic, strong) NSNumber *selectedSubtitleTrack;
 @property(nonatomic, strong) UILabel *statusLabel;
 @property(nonatomic, strong) UILabel *timeLabel;
 @property(nonatomic, strong) UILabel *boostLabel;
@@ -108,6 +124,10 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     return [self isTransportStream] ? [key stringByAppendingString:@":ts-indexed-v1"] : key;
 }
 - (VLCMedia *)playbackMedia {
+    double previous = [NSUserDefaults.standardUserDefaults doubleForKey:self.progressKey];
+    return [self playbackMediaStartingAt:isfinite(previous) && previous > 3 ? previous : 0];
+}
+- (VLCMedia *)playbackMediaStartingAt:(double)position {
     [self.audioOutput reset];
     NSURL *url = ServiceURL(@"/media", self.item[@"path"]);
     if ([self isTransportStream]) {
@@ -121,11 +141,10 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     [media addOption:@":audio-time-stretch"];
     // Select the resume point before input/audio output start. Starting at zero
     // and seeking from tick interrupted the first audio and buffered twice.
-    double previous = [NSUserDefaults.standardUserDefaults doubleForKey:self.progressKey];
     self.restored = YES;
-    if (isfinite(previous) && previous > 3) {
-        [media addOption:[NSString stringWithFormat:@":start-time=%.3f", previous]];
-        self.pendingSeekTime = previous;
+    if (isfinite(position) && position > 0) {
+        [media addOption:[NSString stringWithFormat:@":start-time=%.3f", position]];
+        self.pendingSeekTime = position;
         self.hasPendingSeek = YES;
         self.seekIssuedAt = NSDate.timeIntervalSinceReferenceDate;
         self.waitingForSeekFrames = YES;
@@ -242,6 +261,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     header.backgroundColor = [UIColor colorWithWhite:0 alpha:0.6];
     header.layer.cornerRadius = 16;
     header.translatesAutoresizingMaskIntoConstraints = NO;
+    header.accessibilityIdentifier = @"playerHeader";
     [self.view addSubview:header];
     self.header = header;
 
@@ -295,6 +315,8 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     self.playButton = SymbolButton(@"pause.fill", @"暂停", self, @selector(togglePlay));
     UIButton *back = SymbolButton(@"gobackward.10", @"后退十秒", self, @selector(backward));
     UIButton *forward = SymbolButton(@"goforward.10", @"前进十秒", self, @selector(forward));
+    self.backButton = back;
+    self.forwardButton = forward;
     self.rateButton = [UIButton buttonWithType:UIButtonTypeSystem];
     self.rateButton.tintColor = UIColor.systemMintColor;
     self.rateButton.titleLabel.font = [UIFont monospacedDigitSystemFontOfSize:16 weight:UIFontWeightSemibold];
@@ -304,7 +326,10 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     [self.rateButton addTarget:self action:@selector(rateMenuTouched) forControlEvents:UIControlEventTouchDown];
     UIButton *tracks = SymbolButton(@"captions.bubble", @"字幕和音轨", self, @selector(showTracks));
     UIView *spacer = [UIView new];
+    self.tracksButton = tracks;
+    self.buttonSpacer = spacer;
     UIStackView *buttons = [[UIStackView alloc] initWithArrangedSubviews:@[back, self.playButton, forward, spacer, self.rateButton, tracks]];
+    self.buttonRow = buttons;
     buttons.spacing = 8;
     buttons.alignment = UIStackViewAlignmentCenter;
     self.footer = [[UIStackView alloc] initWithArrangedSubviews:@[self.slider, self.timeLabel, buttons]];
@@ -315,15 +340,18 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     self.footer.layoutMarginsRelativeArrangement = YES;
     self.footer.layoutMargins = UIEdgeInsetsMake(10, 14, 6, 14);
     self.footer.translatesAutoresizingMaskIntoConstraints = NO;
+    self.footer.accessibilityIdentifier = @"playerFooter";
     [self.view addSubview:self.footer];
     UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
+    self.headerTop = [header.topAnchor constraintEqualToAnchor:safe.topAnchor constant:8];
+    self.footerBottom = [self.footer.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-8];
     [NSLayoutConstraint activateConstraints:@[
         [header.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:12],
         [header.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-12],
-        [header.topAnchor constraintEqualToAnchor:safe.topAnchor constant:8],
+        self.headerTop,
         [self.footer.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:12],
         [self.footer.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-12],
-        [self.footer.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-8],
+        self.footerBottom,
         [self.boostLabel.centerXAnchor constraintEqualToAnchor:safe.centerXAnchor],
         [self.boostLabel.topAnchor constraintEqualToAnchor:header.bottomAnchor constant:12],
         [self.boostLabel.widthAnchor constraintEqualToConstant:190],
@@ -370,7 +398,60 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(audioInterrupted:) name:AVAudioSessionInterruptionNotification object:nil];
     UIApplication.sharedApplication.idleTimerDisabled = YES;
 }
-- (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews]; [self updateVideoLayout]; }
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    [self updatePlaybackControlsLayout];
+    [self updateVideoLayout];
+}
+- (void)updatePlaybackControlsLayout {
+    if (!self.footer) return;
+    CGSize size = self.view.bounds.size;
+    BOOL compact = size.width > size.height;
+    if (self.configuredPlaybackLayout && compact == self.compactPlaybackLayout) return;
+    self.configuredPlaybackLayout = YES;
+    self.compactPlaybackLayout = compact;
+    // Reuse the same controls and gesture targets across rotation. In landscape
+    // the timeline shares one 48-point row with playback and track controls.
+    NSArray<UIView *> *controls = @[self.slider, self.timeLabel, self.backButton, self.playButton,
+        self.forwardButton, self.buttonSpacer, self.rateButton, self.tracksButton];
+    for (UIView *control in controls) {
+        if ([control.superview isKindOfClass:UIStackView.class])
+            [(UIStackView *)control.superview removeArrangedSubview:control];
+        [control removeFromSuperview];
+    }
+    [self.footer removeArrangedSubview:self.buttonRow];
+    [self.buttonRow removeFromSuperview];
+    if (compact) {
+        self.footer.axis = UILayoutConstraintAxisHorizontal;
+        self.footer.alignment = UIStackViewAlignmentCenter;
+        self.footer.spacing = 8;
+        self.footer.layoutMargins = UIEdgeInsetsMake(4, 10, 4, 10);
+        self.footer.backgroundColor = [UIColor colorWithWhite:0 alpha:0.6];
+        for (UIView *control in @[self.backButton, self.playButton, self.forwardButton,
+                                  self.timeLabel, self.slider, self.rateButton, self.tracksButton])
+            [self.footer addArrangedSubview:control];
+        [self.timeLabel setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+        [self.timeLabel setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+        [self.slider setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+    } else {
+        self.footer.axis = UILayoutConstraintAxisVertical;
+        self.footer.alignment = UIStackViewAlignmentFill;
+        self.footer.spacing = 4;
+        self.footer.layoutMargins = UIEdgeInsetsMake(10, 14, 6, 14);
+        self.footer.backgroundColor = [UIColor colorWithWhite:0.04 alpha:0.85];
+        [self.timeLabel setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+        [self.timeLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultHigh forAxis:UILayoutConstraintAxisHorizontal];
+        for (UIView *control in @[self.backButton, self.playButton, self.forwardButton,
+                                  self.buttonSpacer, self.rateButton, self.tracksButton])
+            [self.buttonRow addArrangedSubview:control];
+        for (UIView *control in @[self.slider, self.timeLabel, self.buttonRow])
+            [self.footer addArrangedSubview:control];
+    }
+    self.headerTop.constant = compact ? 0 : 8;
+    self.footerBottom.constant = compact ? 0 : -8;
+    self.controlsTouched = NSDate.timeIntervalSinceReferenceDate;
+    [self setNeedsStatusBarAppearanceUpdate];
+}
 - (void)startCropProbeAfterFirstFrames {
     if (self.closed || self.cropTask || self.lastDisplayedFrames < 2) return;
 #if DEBUG
@@ -526,16 +607,19 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     self.controlsTouched = NSDate.timeIntervalSinceReferenceDate;
     self.header.hidden = !self.controlsVisible;
     self.footer.hidden = !self.controlsVisible;
+    if (self.playbackEnded || self.player.state == VLCMediaPlayerStatePaused)
+        self.statusLabel.hidden = !visible;
     [self setNeedsStatusBarAppearanceUpdate];
+    [self setNeedsUpdateOfHomeIndicatorAutoHidden];
 }
 - (void)toggleControls { [self setPlaybackControlsVisible:!self.controlsVisible]; }
 - (BOOL)accessibilityToggleControls { [self toggleControls]; return YES; }
-- (BOOL)accessibilitySeekForward { [self forward]; return self.player.isSeekable; }
-- (BOOL)accessibilitySeekBackward { [self backward]; return self.player.isSeekable; }
+- (BOOL)accessibilitySeekForward { BOOL possible = [self canSeek]; [self forward]; return possible; }
+- (BOOL)accessibilitySeekBackward { BOOL possible = [self canSeek]; [self backward]; return possible; }
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gesture {
     if ([gesture isKindOfClass:UIPanGestureRecognizer.class]) {
         CGPoint velocity = [(UIPanGestureRecognizer *)gesture velocityInView:self.gestureSurface];
-        return fabs(velocity.x) > fabs(velocity.y) * 1.2 && self.player.isSeekable && [self duration] > 0 && !self.boosting;
+        return fabs(velocity.x) > fabs(velocity.y) * 1.2 && [self canSeek] && !self.boosting;
     }
     return YES;
 }
@@ -568,7 +652,8 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         [self cancelPanSeek];
     }
 }
-- (BOOL)prefersStatusBarHidden { return !self.controlsVisible; }
+- (BOOL)prefersStatusBarHidden { return !self.controlsVisible || self.view.bounds.size.width > self.view.bounds.size.height; }
+- (BOOL)prefersHomeIndicatorAutoHidden { return !self.controlsVisible; }
 - (void)togglePlay {
     [self endBoost];
     self.controlsTouched = NSDate.timeIntervalSinceReferenceDate;
@@ -578,15 +663,46 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         if (!self.preparing) [self prepareTransportStream];
         return;
     }
+    if (self.playbackEnded) { [self restartPlaybackAt:0]; return; }
     if (self.player.isPlaying) [self.player pause];
     else {
-        if (self.player.state == VLCMediaPlayerStateEnded) self.player.position = 0;
         [self.player play];
         [self applyPlaybackRate];
     }
 }
-- (double)duration { return self.player.media.length.intValue / 1000.0; }
+- (double)duration {
+    double measured = self.player.media.length.intValue / 1000.0;
+    if (isfinite(measured) && measured > 0) self.knownDuration = measured;
+    return self.knownDuration;
+}
+- (BOOL)canSeek {
+    return !self.preparing && !self.restartingPlayback && [self duration] > 0 &&
+           (self.player.isSeekable || self.playbackEnded);
+}
+- (void)restartPlaybackAt:(double)seconds {
+    if (self.closed || self.restartingPlayback || self.audioInterruptionActive) return;
+    double target = MIN(MAX(0, seconds), MAX(0, [self duration] - 0.25));
+    self.restartingPlayback = YES;
+    self.playbackEnded = NO;
+    [self.player stop];
+    self.hasPendingSeek = NO;
+    self.waitingForSeekFrames = NO;
+    self.lastPlayableTime = 0;
+    self.lastDisplayedFrames = 0;
+    self.appliedGeometry = nil;
+    self.hasConfiguredCrop = NO;
+    self.restoreTracksOnPlay = YES;
+    // EOF has torn down VLC's input, so assigning a position to it does nothing.
+    // Open a fresh input at the requested time, reusing the player/audio output.
+    self.player.media = [self playbackMediaStartingAt:target];
+    self.statusLabel.hidden = NO;
+    self.statusLabel.text = @"正在打开视频…";
+    self.controlsTouched = NSDate.timeIntervalSinceReferenceDate;
+    if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive) [self.player play];
+    else self.resumeAfterBackground = YES;
+}
 - (double)currentPlaybackTime {
+    if (self.playbackEnded) return [self duration];
     double actual = MAX(0, self.player.time.intValue / 1000.0);
     // VLC may not publish a new clock while paused. Retain the requested position
     // until the decoder acknowledges it; stop masking an unsuccessful playing seek.
@@ -598,7 +714,8 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 }
 - (void)seekToTime:(double)seconds {
     double duration = [self duration];
-    if (!self.player.isSeekable || duration <= 0) return;
+    if (![self canSeek]) return;
+    if (self.playbackEnded) { [self restartPlaybackAt:seconds]; return; }
     self.pendingSeekTime = MIN(MAX(seconds, 0), MAX(0, duration - 0.25));
     self.seekIssuedAt = NSDate.timeIntervalSinceReferenceDate;
     self.hasPendingSeek = YES;
@@ -612,7 +729,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 - (void)seekBy:(double)offset {
     [self endBoost];
     self.controlsTouched = NSDate.timeIntervalSinceReferenceDate;
-    if (self.player.isSeekable && [self duration] > 0) {
+    if ([self canSeek]) {
         [self seekToTime:[self currentPlaybackTime] + offset];
     }
 }
@@ -624,7 +741,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 - (void)scrubCancel { self.scrubbing = NO; self.controlsTouched = NSDate.timeIntervalSinceReferenceDate; }
 - (void)saveProgress {
     // A moving clock or requested seek is not evidence that video recovered.
-    if (self.restored && self.lastPlayableTime > 0 && self.player.state != VLCMediaPlayerStateEnded) {
+    if (self.restored && self.lastPlayableTime > 0 && !self.playbackEnded && !self.restartingPlayback && self.player.state != VLCMediaPlayerStateEnded) {
         [NSUserDefaults.standardUserDefaults setDouble:self.lastPlayableTime forKey:self.progressKey];
     }
 }
@@ -638,15 +755,17 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     if (!self.waitingForSeekFrames && displayed > self.lastDisplayedFrames) self.lastPlayableTime = actualTime;
     self.lastDisplayedFrames = displayed;
     [self startCropProbeAfterFirstFrames];
-    self.slider.enabled = self.player.isSeekable && duration > 0;
+    self.slider.enabled = [self canSeek];
+    self.backButton.enabled = self.slider.enabled;
+    self.forwardButton.enabled = self.slider.enabled;
     self.gestureSurface.accessibilityValue = [NSString stringWithFormat:@"%@ / %@", ClockText([self currentPlaybackTime]), ClockText(duration)];
     if (!self.scrubbing && !self.panning) {
         double time = [self currentPlaybackTime];
         self.slider.value = duration > 0 ? time / duration : self.player.position;
         self.timeLabel.text = [NSString stringWithFormat:@"%@ / %@", ClockText(time), ClockText(duration)];
     }
-    [self.playButton setImage:[UIImage systemImageNamed:self.player.isPlaying ? @"pause.fill" : @"play.fill"] forState:UIControlStateNormal];
-    self.playButton.accessibilityLabel = self.player.isPlaying ? @"暂停" : @"播放";
+    [self.playButton setImage:[UIImage systemImageNamed:self.player.isPlaying ? @"pause.fill" : (self.playbackEnded ? @"arrow.counterclockwise" : @"play.fill")] forState:UIControlStateNormal];
+    self.playButton.accessibilityLabel = self.player.isPlaying ? @"暂停" : (self.playbackEnded ? @"重新播放" : @"播放");
     self.playButton.accessibilityValue = self.player.isPlaying ? @"playing" : @"paused";
     self.rateButton.accessibilityValue = [NSString stringWithFormat:@"%g×", self.player.rate];
     BOOL automaticHideEnabled = YES;
@@ -663,24 +782,41 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         if (self.closed) return;
         switch (self.player.state) {
             case VLCMediaPlayerStatePlaying:
+                self.restartingPlayback = NO;
+                self.playbackEnded = NO;
                 self.statusLabel.text = @"";
+                self.statusLabel.hidden = NO;
                 [self applyPlaybackRate];
+                if (self.restoreTracksOnPlay) {
+                    self.restoreTracksOnPlay = NO;
+                    if (self.selectedAudioTrack) self.player.currentAudioTrackIndex = self.selectedAudioTrack.intValue;
+                    if (self.selectedSubtitleTrack) self.player.currentVideoSubTitleIndex = self.selectedSubtitleTrack.intValue;
+                    if (self.selectedExternalSubtitle)
+                        [self.player addPlaybackSlave:ServiceURL(@"/media", self.selectedExternalSubtitle) type:VLCMediaPlaybackSlaveTypeSubtitle enforce:YES];
+                }
                 break;
-            case VLCMediaPlayerStateOpening: self.statusLabel.text = @"正在打开视频…"; break;
+            case VLCMediaPlayerStateOpening: self.statusLabel.hidden = NO; self.statusLabel.text = @"正在打开视频…"; break;
             case VLCMediaPlayerStateBuffering: self.statusLabel.text = @"正在缓冲…"; break;
             case VLCMediaPlayerStateError:
+                self.restartingPlayback = NO;
                 [self endBoost];
                 self.statusLabel.text = @"播放失败\n请检查电脑连接、访问码或视频格式";
                 if (!self.controlsVisible) [self toggleControls];
                 break;
             case VLCMediaPlayerStateEnded:
+                if (self.restartingPlayback) break;
+                [self duration];
+                self.playbackEnded = YES;
                 self.hasPendingSeek = NO;
+                self.waitingForSeekFrames = NO;
+                self.lastPlayableTime = 0;
                 [self endBoost];
                 [NSUserDefaults.standardUserDefaults removeObjectForKey:self.progressKey];
-                self.statusLabel.text = @"播放结束";
+                self.statusLabel.hidden = NO;
+                self.statusLabel.text = @"播放结束\n拖动进度可回看，或点重新播放";
                 if (!self.controlsVisible) [self toggleControls];
                 break;
-            case VLCMediaPlayerStatePaused: self.statusLabel.text = @"已暂停"; break;
+            case VLCMediaPlayerStatePaused: self.statusLabel.text = @"已暂停"; self.statusLabel.hidden = !self.controlsVisible; break;
             default: break;
         }
     });
@@ -695,18 +831,11 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"字幕与音轨" message:self.subtitleFallback ? @"该 TS 的内嵌字幕无法用于播放缓存，仍可选择外挂字幕。" : nil preferredStyle:UIAlertControllerStyleActionSheet];
     [sheet addAction:[UIAlertAction actionWithTitle:@"从头重新播放" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self cancelPanSeek];
-        [self.player stop];
-        self.hasPendingSeek = NO;
-        self.waitingForSeekFrames = NO;
-        self.lastPlayableTime = 0;
-        self.lastDisplayedFrames = 0;
-        self.restored = YES;
         [NSUserDefaults.standardUserDefaults removeObjectForKey:self.progressKey];
         if ([self isTransportStream] && !self.prepared) {
             if (!self.preparing) [self prepareTransportStream];
         } else {
-            self.player.media = [self playbackMedia];
-            [self.player play];
+            [self restartPlaybackAt:0];
         }
         [self setPlaybackControlsVisible:YES];
     }]];
@@ -715,21 +844,34 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     for (NSUInteger i = 0; i < MIN(audioNames.count, audioIDs.count); i++) {
         int track = [audioIDs[i] intValue];
         NSString *name = [NSString stringWithFormat:@"%@音轨 · %@", track == self.player.currentAudioTrackIndex ? @"✓ " : @"", audioNames[i]];
-        [sheet addAction:[UIAlertAction actionWithTitle:name style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { self.player.currentAudioTrackIndex = track; }]];
+        [sheet addAction:[UIAlertAction actionWithTitle:name style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            self.selectedAudioTrack = @(track);
+            self.player.currentAudioTrackIndex = track;
+        }]];
     }
     NSArray *subNames = self.player.videoSubTitlesNames;
     NSArray *subIDs = self.player.videoSubTitlesIndexes;
     for (NSUInteger i = 0; i < MIN(subNames.count, subIDs.count); i++) {
         int track = [subIDs[i] intValue];
         NSString *name = [NSString stringWithFormat:@"%@字幕 · %@", track == self.player.currentVideoSubTitleIndex ? @"✓ " : @"", subNames[i]];
-        [sheet addAction:[UIAlertAction actionWithTitle:name style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { self.player.currentVideoSubTitleIndex = track; }]];
+        [sheet addAction:[UIAlertAction actionWithTitle:name style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            self.selectedExternalSubtitle = nil;
+            self.selectedSubtitleTrack = @(track);
+            self.player.currentVideoSubTitleIndex = track;
+        }]];
     }
     for (NSDictionary *subtitle in self.subtitles) {
         [sheet addAction:[UIAlertAction actionWithTitle:[@"外挂 · " stringByAppendingString:subtitle[@"name"]] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            self.selectedExternalSubtitle = subtitle[@"path"];
+            self.selectedSubtitleTrack = nil;
             [self.player addPlaybackSlave:ServiceURL(@"/media", subtitle[@"path"]) type:VLCMediaPlaybackSlaveTypeSubtitle enforce:YES];
         }]];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"关闭字幕" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { self.player.currentVideoSubTitleIndex = -1; }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"关闭字幕" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        self.selectedExternalSubtitle = nil;
+        self.selectedSubtitleTrack = @(-1);
+        self.player.currentVideoSubTitleIndex = -1;
+    }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     sheet.popoverPresentationController.sourceView = self.footer;
     sheet.popoverPresentationController.sourceRect = self.footer.bounds;

@@ -15,6 +15,8 @@
 - (void)applyPlaybackRate;
 - (void)stopPlayer;
 - (void)audioInterrupted:(NSNotification *)note;
+- (double)duration;
+- (BOOL)canSeek;
 @end
 
 @interface AudioPlaybackTests : XCTestCase
@@ -132,6 +134,24 @@
     XCTAssertEqualWithAccuracy(resumed.player.time.intValue/1000.0, 25, 1.5);
     [self close:resumed];
     NSLog(@"AUDIO_RENDER summary open=%.3f forward=%.3f backward=%.3f unpause=%.3f paused_seek=%.3f speed=%.3f resume=%.3f", open, forward, backward, unpause, pausedSeek, speed, resume);
+}
+- (void)testAudioAndSeekingAfterNaturalEnd {
+    PlayerController *player = [self openAt:0];
+    [self advanceRunLoop:3];
+    XCTAssertTrue([player canSeek]);
+    [player seekToTime:[player duration] - 1];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:12];
+    while (![[player valueForKey:@"playbackEnded"] boolValue] && deadline.timeIntervalSinceNow > 0)
+        [self advanceRunLoop:.05];
+    XCTAssertTrue([[player valueForKey:@"playbackEnded"] boolValue]);
+    XCTAssertTrue([player canSeek], @"Ended media must remain seekable in the app");
+    XCTAssertGreaterThan([player duration], 59);
+    [player.audioOutput beginRenderProbe];
+    [player seekToTime:12];
+    [self checkSound:player label:@"seek-after-end"];
+    XCTAssertEqualWithAccuracy(player.player.time.intValue / 1000.0, 14, 1.5);
+    XCTAssertFalse([[player valueForKey:@"playbackEnded"] boolValue]);
+    [self close:player];
 }
 - (void)tearDown {
     UIViewController *presented = self.window.rootViewController.presentedViewController;
