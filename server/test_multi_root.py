@@ -15,7 +15,8 @@ class MultiRootTests(unittest.TestCase):
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        base = Path(self.temp.name)
+        # macOS exposes /var through /private/var; compare canonical paths.
+        base = Path(self.temp.name).resolve()
         self.roots = [base / 'first' / '同名文件夹', base / 'second' / '同名文件夹']
         for index, root in enumerate(self.roots):
             (root / '子目录').mkdir(parents=True)
