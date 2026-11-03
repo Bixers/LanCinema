@@ -78,17 +78,36 @@ jobs:
           python3 -m pip install --break-system-packages imageio-ffmpeg
           cd server && python3 -m unittest -v test_server.py test_multi_root.py test_video_probe.py test_playback_cache.py
       - name: Boot simulator
-        timeout-minutes: 6
+        timeout-minutes: 9
         run: |
           python3 - <<'PY'
           import json, os, subprocess
-          devices = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'devices', 'available', '-j'], timeout=30))
+          # CoreSimulator can still be starting after xcode-select on a fresh runner.
+          for attempt in range(3):
+              try:
+                  devices = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'devices', 'available', '-j'], timeout=60))
+                  break
+              except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+                  if attempt == 2:
+                      raise
+                  print('CoreSimulator discovery is not ready; retrying', flush=True)
           pairs = [(k, x) for k, xs in devices['devices'].items() for x in xs if x['name'] == 'iPhone 17 Pro']
           pairs.sort(key=lambda p: tuple(int(n) for n in p[0].split('iOS-')[-1].split('-')), reverse=True)
           device = pairs[0][1]['udid']
           print('Selected runtime:', pairs[0][0], flush=True)
           subprocess.run(['xcrun', 'simctl', 'boot', device], check=True, timeout=45)
           subprocess.run(['xcrun', 'simctl', 'bootstatus', device, '-b'], check=True, timeout=240)
+          # simctl boot success alone does not mean Xcode has discovered the device.
+          for attempt in range(3):
+              try:
+                  destinations = subprocess.check_output(['xcodebuild', '-workspace', 'LanCinema.xcworkspace', '-scheme', 'LanCinema', '-showdestinations'], timeout=60, text=True)
+                  if device in destinations:
+                      break
+                  print(destinations, flush=True)
+              except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+                  print('Xcode device discovery is not ready', flush=True)
+              if attempt == 2:
+                  raise RuntimeError('Booted simulator is unavailable to Xcode')
           # Cosmetic appearance commands must not prevent the actual tests.
           try:
               subprocess.run(['xcrun', 'simctl', 'ui', device, 'appearance', 'light'], check=True, timeout=20)
@@ -137,7 +156,7 @@ jobs:
             )
           fi
           xcodebuild -workspace LanCinema.xcworkspace -scheme LanCinema "${TEST_SELECTION[@]}" \
-            -configuration Debug -destination "platform=iOS Simulator,id=$LC_SIMULATOR_ID" \
+            -configuration Debug -destination "platform=iOS Simulator,id=$LC_SIMULATOR_ID" -destination-timeout 120 \
             -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
             -maximum-test-execution-time-allowance 180 \
             -parallel-testing-enabled NO -resultBundlePath UITestResults.xcresult CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- test | tee ui-test.log
