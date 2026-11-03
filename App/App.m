@@ -9,12 +9,8 @@
 
 // Public libvlc frame-step API; use the same owning-player bridge as audio.
 extern void libvlc_media_player_next_frame(void *);
-extern int libvlc_media_slaves_add(void *, int, unsigned, const char *);
 @interface VLCMediaPlayer (LCVideoBridge)
 - (void *)libVLCMediaPlayer;
-@end
-@interface VLCMedia (LCSubtitleBridge)
-- (void *)libVLCMediaDescriptor;
 @end
 
 static NSString *const HostKey = @"computerHost";
@@ -143,12 +139,6 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     // Retain a small jitter buffer for seekable local HTTP media.
     [media addOption:@":network-caching=300"];
     [media addOption:@":audio-time-stretch"];
-    if (self.selectedExternalSubtitle) {
-        // Register the subtitle before input startup/seeking. Attaching it only
-        // after Playing can miss a cue that starts before the resumed position.
-        NSURL *subtitleURL = ServiceURL(@"/media", self.selectedExternalSubtitle);
-        libvlc_media_slaves_add(media.libVLCMediaDescriptor, 0, 4, subtitleURL.absoluteString.UTF8String);
-    }
     // Select the resume point before input/audio output start. Starting at zero
     // and seeking from tick interrupted the first audio and buffered twice.
     self.restored = YES;
@@ -765,6 +755,18 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     if (!self.waitingForSeekFrames && displayed > self.lastDisplayedFrames) self.lastPlayableTime = actualTime;
     self.lastDisplayedFrames = displayed;
     [self startCropProbeAfterFirstFrames];
+    if (self.restoreTracksOnPlay && displayed > 2 && !self.waitingForSeekFrames && self.player.isPlaying && self.player.hasVideoOut) {
+        // Playing is earlier than the replacement video output being ready.
+        // Restore a subtitle only after that output has actually shown frames,
+        // so a cue spanning the resumed timestamp is not lost with the old SPU.
+        self.restoreTracksOnPlay = NO;
+        if (self.selectedAudioTrack && self.player.currentAudioTrackIndex != self.selectedAudioTrack.intValue)
+            self.player.currentAudioTrackIndex = self.selectedAudioTrack.intValue;
+        if (self.selectedSubtitleTrack)
+            self.player.currentVideoSubTitleIndex = self.selectedSubtitleTrack.intValue;
+        if (self.selectedExternalSubtitle)
+            [self.player addPlaybackSlave:ServiceURL(@"/media", self.selectedExternalSubtitle) type:VLCMediaPlaybackSlaveTypeSubtitle enforce:YES];
+    }
     self.slider.enabled = [self canSeek];
     self.backButton.enabled = self.slider.enabled;
     self.forwardButton.enabled = self.slider.enabled;
@@ -801,11 +803,6 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
                 self.statusLabel.text = @"";
                 self.statusLabel.hidden = NO;
                 [self applyPlaybackRate];
-                if (self.restoreTracksOnPlay) {
-                    self.restoreTracksOnPlay = NO;
-                    if (self.selectedAudioTrack) self.player.currentAudioTrackIndex = self.selectedAudioTrack.intValue;
-                    if (self.selectedSubtitleTrack) self.player.currentVideoSubTitleIndex = self.selectedSubtitleTrack.intValue;
-                }
                 break;
             case VLCMediaPlayerStateOpening: self.statusLabel.hidden = NO; self.statusLabel.text = @"正在打开视频…"; break;
             case VLCMediaPlayerStateBuffering: self.statusLabel.hidden = NO; self.statusLabel.text = @"正在缓冲…"; break;

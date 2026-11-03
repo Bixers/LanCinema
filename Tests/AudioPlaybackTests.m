@@ -146,11 +146,14 @@
     XCTAssertTrue([[player valueForKey:@"playbackEnded"] boolValue]);
     XCTAssertTrue([player canSeek], @"Ended media must remain seekable in the app");
     XCTAssertGreaterThan([player duration], 59);
+    [player setValue:@"演示文件夹/中文字幕验证.srt" forKey:@"selectedExternalSubtitle"];
     [player.audioOutput beginRenderProbe];
     [player seekToTime:12];
     [self checkSound:player label:@"seek-after-end"];
     XCTAssertEqualWithAccuracy(player.player.time.intValue / 1000.0, 14, 1.5);
     XCTAssertFalse([[player valueForKey:@"playbackEnded"] boolValue]);
+    NSLog(@"REPLAY_SUBTITLE tracks=%@ selected=%d", player.player.videoSubTitlesNames, player.player.currentVideoSubTitleIndex);
+    XCTAssertGreaterThanOrEqual(player.player.currentVideoSubTitleIndex, 0);
     [self close:player];
 }
 - (void)tearDown {
