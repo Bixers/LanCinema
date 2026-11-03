@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       focused:
-        description: 'Run display-mode UI checks and all unit/audio tests'
+        description: 'Run player display, landscape, EOF, gestures and all unit/audio tests'
         type: boolean
         default: false
       unit_only:
@@ -128,6 +128,11 @@ jobs:
             TEST_SELECTION=(
               '-only-testing:LanCinemaUITests/PlaybackTests/testAutomaticFillAndSavedDisplayMode'
               '-only-testing:LanCinemaUITests/PlaybackTests/testSmartCropKeepsSubtitlesVisible'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testCompactLandscapeControlsAndRotation'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testSeekAndReplayAfterVideoEnds'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testSubtitleAndSpeedSurviveEndRecovery'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testControlsAutoHideAndTapToggle'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testHorizontalCanvasSeekingWithoutGestureConflicts'
               '-only-testing:LanCinemaTests'
             )
           fi

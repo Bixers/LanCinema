@@ -309,7 +309,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     self.timeLabel = [UILabel new];
     self.timeLabel.accessibilityIdentifier = @"playbackTime";
     self.timeLabel.text = @"00:00 / 00:00";
-    self.timeLabel.textColor = UIColor.lightGrayColor;
+    self.timeLabel.textColor = UIColor.whiteColor;
     self.timeLabel.font = [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightRegular];
 
     self.playButton = SymbolButton(@"pause.fill", @"暂停", self, @selector(togglePlay));
@@ -796,10 +796,11 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
                 }
                 break;
             case VLCMediaPlayerStateOpening: self.statusLabel.hidden = NO; self.statusLabel.text = @"正在打开视频…"; break;
-            case VLCMediaPlayerStateBuffering: self.statusLabel.text = @"正在缓冲…"; break;
+            case VLCMediaPlayerStateBuffering: self.statusLabel.hidden = NO; self.statusLabel.text = @"正在缓冲…"; break;
             case VLCMediaPlayerStateError:
                 self.restartingPlayback = NO;
                 [self endBoost];
+                self.statusLabel.hidden = NO;
                 self.statusLabel.text = @"播放失败\n请检查电脑连接、访问码或视频格式";
                 if (!self.controlsVisible) [self toggleControls];
                 break;
