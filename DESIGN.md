@@ -8,6 +8,8 @@ Top-level library has a collapsing large title. Nested folders use inline titles
 
 Controls stay inside safe areas, including landscape. Targets are at least 44 points. Standard menu contains persistent speeds and a separate hold-speed setting. Holding the canvas for 350 ms activates the temporary speed; release, cancellation, app interruption and dismissal restore the selected speed. Seeking and buttons have separate touch regions.
 
+Landscape playback uses a single compact bottom row for skip, play, elapsed/total time, slider, speed, and tracks. Buttons retain 48-point targets; the row uses 4-point vertical padding. The status bar stays hidden in landscape. Both bars sit at safe-area edges, with a dark translucent backing for contrast. Portrait retains the stacked timeline and buttons. Rotation reuses the same controls without reopening playback. Paused status text hides with the bars; EOF retains duration and seeking, with a replay control and a brief hint explaining drag-to-review.
+
 No hero marketing layout, display web fonts, decorative gradients, poster placeholders, or web UI wrappers. Captures must come from the built iOS simulator; browser mockups are not evidence of native rendering.
 
 Connection extends the native visual system: a scrollable form with persistent Password / QR segments, labeled address and password fields, visibility toggle, inline failures, and a primary Connect action. Bonjour discovery never broadcasts credentials. Scanning uses the native camera or a system photo picker.
