@@ -24,6 +24,15 @@
     a.lifetime = XCTAttachmentLifetimeKeepAlways;
     [self addAttachment:a];
 }
+- (XCUIElement *)visibleButton:(NSString *)name {
+    XCUIElementQuery *query = [self.app.buttons matchingIdentifier:name];
+    // UIKit exposes an offscreen accessibility proxy for sticky table headers.
+    // Use the actual hit-testable control, not the first duplicate in the tree.
+    for (XCUIElement *element in query.allElementsBoundByIndex.reverseObjectEnumerator) {
+        if (element.isHittable) return element;
+    }
+    return query.firstMatch;
+}
 - (void)showPlayerControls {
     XCUICoordinate *center = [self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)];
     XCUIElement *close = self.app.buttons[@"关闭播放器"];
@@ -229,44 +238,66 @@
     [self capture:@"controls-tap-revealed"];
     [self closePlayback];
 }
+- (void)testExplorerAppearanceCaptures {
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    [self capture:@"explorer-details-portrait"];
+    [[self visibleButton:@"文件视图"] tap];
+    [[self visibleButton:@"图标"] tap];
+    [self capture:@"explorer-icons-portrait"];
+    [[self visibleButton:@"演示文件夹"] tap];
+    XCTAssertTrue([[self visibleButton:@"下一层"] waitForExistenceWithTimeout:10]);
+    [[self visibleButton:@"文件视图"] tap];
+    [[self visibleButton:@"详细信息"] tap];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationLandscapeLeft;
+    [self capture:@"explorer-details-landscape"];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationPortrait;
+    [self.app terminate];
+    self.app.launchArguments = @[@"--ui-test-dark", @"--ui-test-large"];
+    [self.app launch];
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    [self capture:@"explorer-details-dark-large"];
+    [[self visibleButton:@"文件视图"] tap];
+    [[self visibleButton:@"图标"] tap];
+    [self capture:@"explorer-icons-dark-large"];
+}
 - (void)testExplorerViewsNavigationAndPersistence {
     XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
-    XCTAssertEqualObjects(self.app.buttons[@"文件视图"].value, @"详细信息");
-    XCTAssertFalse([self.app.buttons matchingIdentifier:@"上一级文件夹"].firstMatch.enabled);
+    XCTAssertEqualObjects([self visibleButton:@"文件视图"].value, @"详细信息");
+    XCTAssertFalse([self visibleButton:@"上一级文件夹"].enabled);
     [self capture:@"explorer-details-portrait"];
-    [[self.app.buttons matchingIdentifier:@"按大小排序"].firstMatch tap];
-    XCTAssertEqualObjects(self.app.buttons[@"排序"].value, @"大小 · 从小到大");
-    [[self.app.buttons matchingIdentifier:@"按大小排序"].firstMatch tap];
-    XCTAssertEqualObjects(self.app.buttons[@"排序"].value, @"大小 · 从大到小");
-    [self.app.buttons[@"文件视图"] tap];
-    [self.app.buttons[@"图标"] tap];
-    XCTAssertTrue(self.app.buttons[@"演示文件夹"].exists);
+    [[self visibleButton:@"按大小排序"] tap];
+    XCTAssertEqualObjects([self visibleButton:@"排序"].value, @"大小 · 从小到大");
+    [[self visibleButton:@"按大小排序"] tap];
+    XCTAssertEqualObjects([self visibleButton:@"排序"].value, @"大小 · 从大到小");
+    [[self visibleButton:@"文件视图"] tap];
+    [[self visibleButton:@"图标"] tap];
+    XCTAssertTrue([self visibleButton:@"演示文件夹"].exists);
     [self capture:@"explorer-icons-portrait"];
-    [self.app.buttons[@"演示文件夹"] tap];
-    XCTAssertTrue([self.app.buttons[@"下一层"] waitForExistenceWithTimeout:10]);
-    [self.app.buttons[@"下一层"] tap];
+    [[self visibleButton:@"演示文件夹"] tap];
+    XCTAssertTrue([[self visibleButton:@"下一层"] waitForExistenceWithTimeout:10]);
+    [[self visibleButton:@"下一层"] tap];
     XCTAssertTrue([self.app.staticTexts[@"这个文件夹是空的"] waitForExistenceWithTimeout:10]);
-    [[self.app.buttons matchingIdentifier:@"文件夹路径"].firstMatch tap];
-    [[self.app.buttons matchingIdentifier:@"演示文件夹"].allElementsBoundByIndex.lastObject tap];
-    XCTAssertTrue([self.app.buttons[@"下一层"] waitForExistenceWithTimeout:10]);
-    [[self.app.buttons matchingIdentifier:@"上一级文件夹"].firstMatch tap];
-    XCTAssertTrue([self.app.buttons[@"演示文件夹"] waitForExistenceWithTimeout:10]);
+    [[self visibleButton:@"文件夹路径"] tap];
+    [[self visibleButton:@"演示文件夹"] tap];
+    XCTAssertTrue([[self visibleButton:@"下一层"] waitForExistenceWithTimeout:10]);
+    [[self visibleButton:@"上一级文件夹"] tap];
+    XCTAssertTrue([[self visibleButton:@"演示文件夹"] waitForExistenceWithTimeout:10]);
     [self.app terminate];
     self.app.launchArguments = @[];
     [self.app launch];
-    XCTAssertTrue([self.app.buttons[@"演示文件夹"] waitForExistenceWithTimeout:20]);
-    XCTAssertEqualObjects(self.app.buttons[@"文件视图"].value, @"图标");
-    XCTAssertEqualObjects(self.app.buttons[@"排序"].value, @"大小 · 从大到小");
-    [self.app.buttons[@"演示文件夹"] tap];
-    [self.app.buttons[@"文件视图"] tap];
-    [self.app.buttons[@"详细信息"] tap];
+    XCTAssertTrue([[self visibleButton:@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    XCTAssertEqualObjects([self visibleButton:@"文件视图"].value, @"图标");
+    XCTAssertEqualObjects([self visibleButton:@"排序"].value, @"大小 · 从大到小");
+    [[self visibleButton:@"演示文件夹"] tap];
+    [[self visibleButton:@"文件视图"] tap];
+    [[self visibleButton:@"详细信息"] tap];
     XCUIDevice.sharedDevice.orientation = UIDeviceOrientationLandscapeLeft;
-    XCTAssertTrue([self.app.buttons[@"按修改时间排序"] waitForExistenceWithTimeout:10]);
+    XCTAssertTrue([[self visibleButton:@"按修改时间排序"] waitForExistenceWithTimeout:10]);
     [self capture:@"explorer-details-landscape"];
     XCUIDevice.sharedDevice.orientation = UIDeviceOrientationPortrait;
-    [self.app.buttons[@"文件视图"] tap];
-    [self.app.buttons[@"图标"] tap];
-    XCUIElement *video = self.app.buttons[@"偏心黑边字幕测试.mkv"];
+    [[self visibleButton:@"文件视图"] tap];
+    [[self visibleButton:@"图标"] tap];
+    XCUIElement *video = [self visibleButton:@"偏心黑边字幕测试.mkv"];
     XCTAssertTrue([video waitForExistenceWithTimeout:10]);
     [video tap];
     [self waitForPlaybackSecondsFrom:1 to:50];
@@ -275,10 +306,10 @@
     [self.app terminate];
     self.app.launchArguments = @[@"--ui-test-dark", @"--ui-test-large"];
     [self.app launch];
-    XCTAssertTrue([self.app.buttons[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    XCTAssertTrue([[self visibleButton:@"演示文件夹"] waitForExistenceWithTimeout:20]);
     [self capture:@"explorer-icons-dark-large"];
-    [self.app.buttons[@"文件视图"] tap];
-    [self.app.buttons[@"详细信息"] tap];
+    [[self visibleButton:@"文件视图"] tap];
+    [[self visibleButton:@"详细信息"] tap];
     [self capture:@"explorer-details-dark-large"];
 }
 - (void)testCompactLandscapeControlsAndRotation {
