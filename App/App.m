@@ -28,7 +28,7 @@ static NSURL *ServiceURL(NSString *endpoint, NSString *path) {
     c.path = endpoint;
     c.queryItems = @[[NSURLQueryItem queryItemWithName:@"path" value:path ?: @""],
                      [NSURLQueryItem queryItemWithName:@"token" value:LCPassword()]];
-    return c.URL;
+    return LCURLForHTTPQuery(c);
 }
 
 static NSString *ClockText(double seconds) {
@@ -134,7 +134,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     if ([self isTransportStream]) {
         NSURLComponents *components = [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
         components.queryItems = [components.queryItems arrayByAddingObject:[NSURLQueryItem queryItemWithName:@"prepared" value:@"1"]];
-        url = components.URL;
+        url = LCURLForHTTPQuery(components);
     }
     VLCMedia *media = [VLCMedia mediaWithURL:url];
     // Retain a small jitter buffer for seekable local HTTP media.
@@ -1119,7 +1119,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     if (searching && url) {
         NSURLComponents *components = [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
         components.queryItems = [components.queryItems arrayByAddingObject:[NSURLQueryItem queryItemWithName:@"q" value:query]];
-        url = components.URL;
+        url = LCURLForHTTPQuery(components);
     }
     if (!url) { self.message.text = @"电脑地址无效，请修改连接设置"; [self.refreshControl endRefreshing]; return; }
     self.message.text = searching ? @"正在搜索此文件夹\n及所有子文件夹…" : (self.items.count ? @"" : @"正在读取文件夹…");

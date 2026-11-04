@@ -433,6 +433,28 @@
     XCTAssertTrue([self.app.staticTexts[@"没有匹配的文件"] waitForExistenceWithTimeout:5]);
     [self capture:@"empty-search"];
 }
+- (void)testSpecialCharacterFolderSearchAndPlayback {
+    XCUIElement *folder = self.app.staticTexts[@"符号+ &%# 测试"];
+    XCTAssertTrue([folder waitForExistenceWithTimeout:20]);
+    [folder tap];
+    XCTAssertTrue([self.app.staticTexts[@"视频+ &%# 测试.mkv"] waitForExistenceWithTimeout:10]);
+    [self.app.searchFields.firstMatch tap];
+    [self.app.searchFields.firstMatch typeText:@"+"];
+    [self expectationForPredicate:[NSPredicate predicateWithFormat:@"exists == NO"]
+             evaluatedWithObject:self.app.staticTexts[@"视频 空格.mkv"] handler:nil];
+    [self waitForExpectationsWithTimeout:10 handler:nil];
+    XCTAssertTrue([self.app.staticTexts[@"视频+ &%# 测试.ts"] waitForExistenceWithTimeout:10]);
+    [self capture:@"special-characters-search"];
+    for (NSString *name in @[@"视频+ &%# 测试.mkv", @"视频+ &%# 测试.ts"]) {
+        [self.app.staticTexts[name] tap];
+        [self waitForPlaybackSecondsFrom:1 to:50];
+        [self assertVideoFramesAdvance:@"special-characters-playing"];
+        [self.app.sliders[@"播放进度"] adjustToNormalizedSliderPosition:.5];
+        [self waitForPlaybackSecondsFrom:26 to:38];
+        [self assertVideoFramesAdvance:@"special-characters-seek"];
+        [self closePlayback];
+    }
+}
 - (void)testConnectionSettingsAndPersistence {
     XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
     [self.app.buttons[@"电脑连接设置"] tap];

@@ -5,6 +5,13 @@
 #import <CoreImage/CoreImage.h>
 #import <arpa/inet.h>
 
+NSURL *LCURLForHTTPQuery(NSURLComponents *components) {
+    // NSURLQueryItem allows literal '+', while Python's parse_qs treats it as
+    // a form-encoded space. Apply this after the final query-item mutation.
+    components.percentEncodedQuery = [components.percentEncodedQuery stringByReplacingOccurrencesOfString:@"+" withString:@"%2B"];
+    return components.URL;
+}
+
 static NSDictionary *PasswordQuery(void) {
     return @{(__bridge id)kSecClass:(__bridge id)kSecClassGenericPassword,
              (__bridge id)kSecAttrService:@"local.bixer.LanCinema", (__bridge id)kSecAttrAccount:@"computerPassword"};
@@ -274,7 +281,7 @@ NSString *LCQRCodeFromImage(UIImage *image) {
     self.connect.enabled = NO; self.status.text = @"正在验证密码并连接…";
     NSURLComponents *c = [NSURLComponents new]; c.scheme = @"http"; c.host = host; c.port = @8123; c.path = @"/api/info";
     c.queryItems = @[[NSURLQueryItem queryItemWithName:@"token" value:password]];
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:c.URL]; request.timeoutInterval = 10;
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:LCURLForHTTPQuery(c)]; request.timeoutInterval = 10;
     __weak typeof(self) weakSelf = self;
     self.task = [NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         NSDictionary *json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;

@@ -5,6 +5,27 @@
 @interface ConnectionTests : XCTestCase
 @end
 @implementation ConnectionTests
+- (void)testHTTPQueryPreservesPlusAndExistingEscapes {
+    NSURLComponents *components = [NSURLComponents componentsWithString:@"http://127.0.0.1:8123/media"];
+    NSString *path = @"中文+ 空格/&%#视频%2B+.mkv";
+    NSString *password = @"a+b &%#密码";
+    components.queryItems = @[[NSURLQueryItem queryItemWithName:@"path" value:path],
+                             [NSURLQueryItem queryItemWithName:@"token" value:password]];
+    NSURL *url = LCURLForHTTPQuery(components);
+    // Rebuilding queryItems (TS preparation and search) decodes '+' again.
+    components = [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
+    components.queryItems = [components.queryItems arrayByAddingObject:[NSURLQueryItem queryItemWithName:@"q" value:@"C++ %2B"]];
+    url = LCURLForHTTPQuery(components);
+    NSURLComponents *result = [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
+    XCTAssertFalse([result.percentEncodedQuery containsString:@"+"]);
+    XCTAssertTrue([result.percentEncodedQuery containsString:@"%2B"]);
+    XCTAssertTrue([result.percentEncodedQuery containsString:@"%252B"]);
+    NSMutableDictionary *values = [NSMutableDictionary new];
+    for (NSURLQueryItem *item in result.queryItems) values[item.name] = item.value;
+    XCTAssertEqualObjects(values[@"path"], path);
+    XCTAssertEqualObjects(values[@"token"], password);
+    XCTAssertEqualObjects(values[@"q"], @"C++ %2B");
+}
 - (void)testQRCodeImageDecodesConnection {
     NSString *file = [[NSBundle bundleForClass:self.class] pathForResource:@"connection-qr" ofType:@"png"];
     UIImage *image = [UIImage imageWithContentsOfFile:file];
