@@ -1,6 +1,10 @@
-# 局域影院 · iOS 1.6.0 / 电脑端 1.4.1
+# 局域影院 · iOS 1.6.1 / 电脑端 1.4.2
 
 Windows 电脑文件夹的 iPhone 浏览与播放客户端。默认共享 `G:\123`，可在电脑端添加多个文件夹，支持跨盘符。支持嵌套目录、递归搜索、长名称换行、VLC 多格式播放、进度记忆、0.5～3 倍速和长按临时倍速。
+
+iOS 1.6.1 / build 16 与电脑端 1.4.2 补齐视频缩略图：图标视图显示视频中的真实画面，详细信息显示小预览。图片保持比例，名称继续完整换行；无法取帧时保留视频图标，不阻止打开文件。仅为可见项目请求封面，离开时取消，最多两路请求；电脑端复用内置 FFmpeg 本地取帧，独立磁盘缓存随文件大小或修改时间变化而失效，不更改原视频。**请同时更新 EXE 和 IPA**：从电脑托盘退出旧服务后运行新版，点击“保存并应用”更新自启路径，手机返回文件库刷新。共享目录、密码和原设置保留。
+
+封面缓存位于 `%LOCALAPPDATA%\LanCinema\thumbnails`，最多约 128 MiB 或 2000 张，按最近使用清理。手机使用最多约 16 MiB / 200 项的内存缓存，不把封面或密码写入系统 URL 磁盘缓存。首次浏览会先显示文件图标，完成取帧后出现图片。损坏或当前解码器不支持的视频可能无法显示缩略图，仍可尝试播放。
 
 iOS 1.6.0 / build 15 将文件库调整为资源管理器式浏览：默认“详细信息”，可从右上角切换“图标”。详细信息显示名称、大小、类型和修改时间；竖屏先完整显示文件名，再显示元数据，横屏按列对齐。列标题可点击排序，再次点击反向；原排序菜单保留，文件夹始终优先。黄色文件夹和视频、字幕图标方便识别；名称不限行数。路径菜单可跳转祖先目录，向上箭头返回父文件夹，视图和排序自动保存。辅助大字体下图标视图改为单列。搜索仍覆盖当前目录及所有子目录，并显示结果所在位置。**只需更新 IPA，电脑端继续使用 1.4.1。**
 
@@ -38,7 +42,7 @@ build 5 增加画面横向拖动调节进度：右滑快进、左滑后退，滑
 
 ## 使用
 
-1. 运行 `LanCinema-PC-1.4.1.exe`，点击“添加文件夹…”添加一个或多个共享目录（支持跨盘符），设置至少 8 位连接密码，点击“保存并应用”。设置保存到 `%LOCALAPPDATA%\LanCinema\settings.json`，密码使用 Windows DPAPI 加密。
+1. 从托盘退出旧服务后运行 `LanCinema-PC-1.4.2.exe`，点击“添加文件夹…”添加一个或多个共享目录（支持跨盘符），设置至少 8 位连接密码，点击“保存并应用”。设置保存到 `%LOCALAPPDATA%\LanCinema\settings.json`，密码使用 Windows DPAPI 加密。
 2. “登录 Windows 后自动启动”可开关；默认开启。关闭窗口后在托盘继续运行；右键托盘图标可退出。修改 EXE 所在位置后，请重新打开并保存设置以更新自启路径。
 3. 手机和电脑在同一局域网。App 可自动发现电脑并输入密码连接，或扫描电脑端二维码（也支持从相册识别）。发现受阻时可手动填写电脑端显示的 IPv4 地址。固定端口 8123。允许 App 使用本地网络；相机权限仅用于扫码。
 4. 手机连接成功后保存地址，密码放入 iOS 钥匙串。修改共享目录后返回文件库首页并刷新；修改电脑密码后需重新连接。
@@ -47,6 +51,8 @@ build 5 增加画面横向拖动调节进度：右滑快进、左滑后退，滑
 电脑关闭、休眠或退出服务时不能继续访问。视频不转码，经局域网 HTTP 传输；自动黑边检测仅在本地解码少量帧，不上传视频。
 
 ## 构建与验证
+
+1.6.1 验证进度（2026-11-05）：Windows 本地 46 项检查中 45 项通过、1 项因符号链接权限跳过；冻结 EXE 模块与包内 FFmpeg 的 19 项检查通过，独立 EXE 启动通过。[ARM 构建](https://github.com/Bixers/LanCinema/actions/runs/41859782285)与[备用 Intel 构建](https://github.com/Bixers/LanCinema/actions/runs/41862570197)尚在等待托管机器，IPA 和本版原生 UI 截图验证暂未完成。
 
 1.6.0 / build 15 的[最终文件视图专项](https://github.com/Bixers/LanCinema/actions/runs/41843838795)通过 2 项原生 UI 测试，覆盖详细信息/图标切换、列排序、目录导航、重启保存、递归搜索和实际视频画面推进；同名搜索结果的可访问性值包含各自父目录、类型和大小，播放后包含续播信息。原生截图检查竖屏、横屏、深色和辅助大字体。[此前回归](https://github.com/Bixers/LanCinema/actions/runs/41837440547)中 5 项浏览/播放器测试与全部 14 项单元/音频测试通过，新增导航测试当时因命中不可点击的重复可访问性节点而失败，已修正定位并在最终专项复测。此后生产代码仅补充图标按钮的 VoiceOver 元数据；上述回归未在最终提交上全部重跑。正式包已核验版本、ZIP、哈希和中文字体；实体手机与实际读屏语音尚未验证。
 
@@ -64,7 +70,7 @@ IPA：GitHub Actions 使用 macOS、Xcode 26.6、XcodeGen、CocoaPods 与 Mobile
 
 Windows 10/11：Python 3.9+，安装 `server/requirements-desktop.txt`，运行 `python -m PyInstaller --noconfirm LanCinema-PC.spec`。独立 EXE 内含 Python、Qt、二维码、Bonjour 与 FFmpeg，不要求使用者另装 Python。
 
-测试：`cd server` 后运行 `python -m unittest -v test_server.py test_multi_root.py test_video_probe.py test_playback_cache.py`；Windows 另运行 `test_desktop.py`。
+测试：`cd server` 后运行 `python -m unittest -v test_server.py test_multi_root.py test_video_probe.py test_playback_cache.py test_thumbnails.py`；Windows 另运行 `test_desktop.py`。
 
 ## 数据与依赖
 
