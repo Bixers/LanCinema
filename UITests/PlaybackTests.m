@@ -232,11 +232,11 @@
 - (void)testExplorerViewsNavigationAndPersistence {
     XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
     XCTAssertEqualObjects(self.app.buttons[@"文件视图"].value, @"详细信息");
-    XCTAssertFalse(self.app.buttons[@"上一级文件夹"].enabled);
+    XCTAssertFalse([self.app.buttons matchingIdentifier:@"上一级文件夹"].firstMatch.enabled);
     [self capture:@"explorer-details-portrait"];
-    [self.app.buttons[@"按大小排序"] tap];
+    [[self.app.buttons matchingIdentifier:@"按大小排序"].firstMatch tap];
     XCTAssertEqualObjects(self.app.buttons[@"排序"].value, @"大小 · 从小到大");
-    [self.app.buttons[@"按大小排序"] tap];
+    [[self.app.buttons matchingIdentifier:@"按大小排序"].firstMatch tap];
     XCTAssertEqualObjects(self.app.buttons[@"排序"].value, @"大小 · 从大到小");
     [self.app.buttons[@"文件视图"] tap];
     [self.app.buttons[@"图标"] tap];
@@ -246,10 +246,10 @@
     XCTAssertTrue([self.app.buttons[@"下一层"] waitForExistenceWithTimeout:10]);
     [self.app.buttons[@"下一层"] tap];
     XCTAssertTrue([self.app.staticTexts[@"这个文件夹是空的"] waitForExistenceWithTimeout:10]);
-    [self.app.buttons[@"文件夹路径"] tap];
-    [self.app.buttons[@"演示文件夹"] tap];
+    [[self.app.buttons matchingIdentifier:@"文件夹路径"].firstMatch tap];
+    [[self.app.buttons matchingIdentifier:@"演示文件夹"].allElementsBoundByIndex.lastObject tap];
     XCTAssertTrue([self.app.buttons[@"下一层"] waitForExistenceWithTimeout:10]);
-    [self.app.buttons[@"上一级文件夹"] tap];
+    [[self.app.buttons matchingIdentifier:@"上一级文件夹"].firstMatch tap];
     XCTAssertTrue([self.app.buttons[@"演示文件夹"] waitForExistenceWithTimeout:10]);
     [self.app terminate];
     self.app.launchArguments = @[];
@@ -563,6 +563,7 @@
     if (!fit.isHittable) [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)] tap];
     [pause tap];
     XCTAssertEqualObjects(fit.value, @"智能适配");
+    [self waitForPictureCoverageFrom:.4 to:.7];
     // Check actual pixels: the colorful synthetic subject must occupy the center,
     // rather than a black frame or the original tiny rectangle within black bars.
     CGImageRef image = self.app.screenshot.image.CGImage;

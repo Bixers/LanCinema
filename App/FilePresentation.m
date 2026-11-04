@@ -29,7 +29,7 @@ UIStackView *LCFileColumns(NSArray<UIView *> *views, BOOL wide) {
     return stack;
 }
 
-UIView *LCFileEntry(NSDictionary *item, NSString *extra, BOOL icons, BOOL wide) {
+UIView *LCFileEntry(NSDictionary *item, NSString *extra, BOOL icons, BOOL wide, UITraitCollection *traits) {
     BOOL folder = [item[@"directory"] boolValue];
     BOOL video = [item[@"video"] boolValue];
     BOOL subtitle = [item[@"subtitle"] boolValue];
@@ -74,7 +74,14 @@ UIView *LCFileEntry(NSDictionary *item, NSString *extra, BOOL icons, BOOL wide) 
     dateLabel.accessibilityLabel = [@"修改时间 " stringByAppendingString:date];
     if (wide) return LCFileColumns(@[identity, sizeLabel, typeLabel, dateLabel], YES);
     UIStackView *metadata = LCFileColumns(@[sizeLabel, typeLabel, dateLabel], NO);
-    if (UIContentSizeCategoryIsAccessibilityCategory(name.traitCollection.preferredContentSizeCategory)) metadata.axis = UILayoutConstraintAxisVertical;
+    if (UIContentSizeCategoryIsAccessibilityCategory(traits.preferredContentSizeCategory)) {
+        metadata.axis = UILayoutConstraintAxisVertical;
+        metadata.alignment = UIStackViewAlignmentLeading;
+        metadata.distribution = UIStackViewDistributionFill;
+        sizeLabel.text = [@"大小：" stringByAppendingString:size];
+        typeLabel.text = [@"类型：" stringByAppendingString:type];
+        dateLabel.text = [@"修改：" stringByAppendingString:date];
+    }
     UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:@[identity, metadata]];
     row.axis = UILayoutConstraintAxisVertical;
     row.spacing = 7;

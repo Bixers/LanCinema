@@ -1122,12 +1122,20 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     [self navigateToFolder:[self.folder stringByDeletingLastPathComponent] title:[self.folder stringByDeletingLastPathComponent].lastPathComponent];
 }
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
-    UITableViewHeaderFooterView *header = [[UITableViewHeaderFooterView alloc] initWithReuseIdentifier:nil];
-    header.contentView.backgroundColor = UIColor.secondarySystemBackgroundColor;
+    UIView *header = [UIView new];
+    header.layoutMargins = UIEdgeInsetsMake(0, 16, 0, 16);
+    header.backgroundColor = UIColor.secondarySystemBackgroundColor;
+    BOOL accessible = UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory);
     UIButton *path = [UIButton buttonWithType:UIButtonTypeSystem];
     UIButtonConfiguration *config = [UIButtonConfiguration plainButtonConfiguration];
     NSString *root = @"共享文件夹";
-    config.title = self.folder.length ? [root stringByAppendingFormat:@" / %@", self.folder] : root;
+    NSString *fullPath = self.folder.length ? [root stringByAppendingFormat:@" / %@", self.folder] : root;
+    config.title = accessible ? @"文件夹路径" : fullPath;
+    UIFont *pathFont = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleSubheadline] scaledFontForFont:[UIFont systemFontOfSize:15] maximumPointSize:24 compatibleWithTraitCollection:self.traitCollection];
+    config.titleTextAttributesTransformer = ^NSDictionary *(NSDictionary *attributes) {
+        NSMutableDictionary *result = [attributes mutableCopy]; result[NSFontAttributeName] = pathFont; return result;
+    };
+    config.preferredSymbolConfigurationForImage = [UIImageSymbolConfiguration configurationWithPointSize:20];
     config.image = [UIImage systemImageNamed:@"folder"];
     config.imagePadding = 8;
     config.contentInsets = NSDirectionalEdgeInsetsMake(8, 0, 8, 0);
@@ -1136,7 +1144,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     path.titleLabel.numberOfLines = 0;
     path.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeading;
     path.accessibilityLabel = @"文件夹路径";
-    path.accessibilityValue = config.title;
+    path.accessibilityValue = fullPath;
     [path.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
     NSMutableArray *ancestors = [NSMutableArray new];
     __weak typeof(self) owner = self;
@@ -1153,6 +1161,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     path.showsMenuAsPrimaryAction = YES;
     UIButton *up = [UIButton buttonWithType:UIButtonTypeSystem];
     [up setImage:[UIImage systemImageNamed:@"arrow.up"] forState:UIControlStateNormal];
+    [up setPreferredSymbolConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:20] forImageInState:UIControlStateNormal];
     up.accessibilityLabel = @"上一级文件夹";
     up.enabled = self.folder.length > 0;
     [up addTarget:self action:@selector(goToParent) forControlEvents:UIControlEventTouchUpInside];
@@ -1162,7 +1171,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     location.spacing = 8;
     UIStackView *content = [[UIStackView alloc] initWithArrangedSubviews:@[location]];
     content.axis = UILayoutConstraintAxisVertical;
-    if (![self usesIcons]) {
+    if (![self usesIcons] && !accessible) {
         NSMutableArray *buttons = [NSMutableArray new];
         NSArray *keys = @[@"name", @"size", @"type", @"modified"];
         NSArray *titles = @[@"名称", @"大小", @"类型", @"修改时间"];
@@ -1173,6 +1182,10 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
             NSString *title = titles[i];
             UIButtonConfiguration *style = [UIButtonConfiguration plainButtonConfiguration];
             style.title = title;
+            UIFont *font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1 compatibleWithTraitCollection:self.traitCollection];
+            style.titleTextAttributesTransformer = ^NSDictionary *(NSDictionary *attributes) {
+                NSMutableDictionary *result = [attributes mutableCopy]; result[NSFontAttributeName] = font; return result;
+            };
             if (selected) {
                 style.image = [UIImage systemImageNamed:[NSUserDefaults.standardUserDefaults boolForKey:@"fileSortDescending"] ? @"chevron.down" : @"chevron.up"];
                 style.imagePlacement = NSDirectionalRectEdgeTrailing;
@@ -1199,12 +1212,12 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         [content addArrangedSubview:LCFileColumns(buttons, self.wideFileColumns)];
     }
     content.translatesAutoresizingMaskIntoConstraints = NO;
-    [header.contentView addSubview:content];
+    [header addSubview:content];
     [NSLayoutConstraint activateConstraints:@[
-        [content.leadingAnchor constraintEqualToAnchor:header.contentView.layoutMarginsGuide.leadingAnchor],
-        [content.trailingAnchor constraintEqualToAnchor:header.contentView.layoutMarginsGuide.trailingAnchor],
-        [content.topAnchor constraintEqualToAnchor:header.contentView.topAnchor],
-        [content.bottomAnchor constraintEqualToAnchor:header.contentView.bottomAnchor]]];
+        [content.leadingAnchor constraintEqualToAnchor:header.layoutMarginsGuide.leadingAnchor],
+        [content.trailingAnchor constraintEqualToAnchor:header.layoutMarginsGuide.trailingAnchor],
+        [content.topAnchor constraintEqualToAnchor:header.topAnchor],
+        [content.bottomAnchor constraintEqualToAnchor:header.bottomAnchor]]];
     return header;
 }
 - (NSString *)sortKey {
@@ -1369,7 +1382,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         NSInteger index = indexPath.row * columns + col;
         if (index >= self.visibleItems.count) { [row addArrangedSubview:[UIView new]]; continue; }
         NSDictionary *item = self.visibleItems[index];
-        UIView *entry = LCFileEntry(item, [self extraForItem:item], [self usesIcons], self.wideFileColumns);
+        UIView *entry = LCFileEntry(item, [self extraForItem:item], [self usesIcons], self.wideFileColumns, self.traitCollection);
         if ([self usesIcons]) {
             UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
             button.accessibilityLabel = item[@"name"];

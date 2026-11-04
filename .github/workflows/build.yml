@@ -2,6 +2,10 @@ name: Build unsigned IPA
 on:
   workflow_dispatch:
     inputs:
+      browser:
+        description: 'Run file browser, search, sorting, display and EOF checks plus unit/audio tests'
+        type: boolean
+        default: false
       focused:
         description: 'Run player display, landscape, EOF, gestures and all unit/audio tests'
         type: boolean
@@ -143,6 +147,16 @@ jobs:
           TEST_SELECTION=()
           if [ '${{ inputs.unit_only }}' = 'true' ]; then
             TEST_SELECTION=('-only-testing:LanCinemaTests')
+          elif [ '${{ inputs.browser }}' = 'true' ]; then
+            TEST_SELECTION=(
+              '-only-testing:LanCinemaUITests/PlaybackTests/testExplorerViewsNavigationAndPersistence'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testSortingMenuAndSavedChoice'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testRecursiveSearchAndWrappedNames'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testSpecialCharacterFolderSearchAndPlayback'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testAutomaticFillAndSavedDisplayMode'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testSeekAndReplayAfterVideoEnds'
+              '-only-testing:LanCinemaTests'
+            )
           elif [ '${{ inputs.focused }}' = 'true' ]; then
             TEST_SELECTION=(
               '-only-testing:LanCinemaUITests/PlaybackTests/testExplorerViewsNavigationAndPersistence'
