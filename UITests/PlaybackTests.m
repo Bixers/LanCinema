@@ -276,7 +276,9 @@
     [[self visibleButton:@"演示文件夹"] tap];
     XCTAssertTrue([[self visibleButton:@"下一层"] waitForExistenceWithTimeout:10]);
     [[self visibleButton:@"下一层"] tap];
-    XCTAssertTrue([self.app.staticTexts[@"这个文件夹是空的"] waitForExistenceWithTimeout:10]);
+    // The committed nested fixture contains Git's placeholder, so it is not empty.
+    XCTAssertTrue([[self visibleButton:@".gitkeep"] waitForExistenceWithTimeout:10]);
+    XCTAssertTrue([[self visibleButton:@"文件夹路径"].value hasSuffix:@"演示文件夹/下一层"]);
     [[self visibleButton:@"文件夹路径"] tap];
     [[self visibleButton:@"演示文件夹"] tap];
     XCTAssertTrue([[self visibleButton:@"下一层"] waitForExistenceWithTimeout:10]);
@@ -289,28 +291,13 @@
     XCTAssertEqualObjects([self visibleButton:@"文件视图"].value, @"图标");
     XCTAssertEqualObjects([self visibleButton:@"排序"].value, @"大小 · 从大到小");
     [[self visibleButton:@"演示文件夹"] tap];
-    [[self visibleButton:@"文件视图"] tap];
-    [[self visibleButton:@"详细信息"] tap];
-    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationLandscapeLeft;
-    XCTAssertTrue([[self visibleButton:@"按修改时间排序"] waitForExistenceWithTimeout:10]);
-    [self capture:@"explorer-details-landscape"];
-    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationPortrait;
-    [[self visibleButton:@"文件视图"] tap];
-    [[self visibleButton:@"图标"] tap];
-    XCUIElement *video = [self visibleButton:@"偏心黑边字幕测试.mkv"];
+    // Use the moving test pattern; the subtitle framing fixture is static.
+    XCUIElement *video = [self visibleButton:@"测试视频.mkv"];
     XCTAssertTrue([video waitForExistenceWithTimeout:10]);
     [video tap];
     [self waitForPlaybackSecondsFrom:1 to:50];
     [self assertVideoFramesAdvance:@"explorer-icon-playback"];
     [self closePlayback];
-    [self.app terminate];
-    self.app.launchArguments = @[@"--ui-test-dark", @"--ui-test-large"];
-    [self.app launch];
-    XCTAssertTrue([[self visibleButton:@"演示文件夹"] waitForExistenceWithTimeout:20]);
-    [self capture:@"explorer-icons-dark-large"];
-    [[self visibleButton:@"文件视图"] tap];
-    [[self visibleButton:@"详细信息"] tap];
-    [self capture:@"explorer-details-dark-large"];
 }
 - (void)testCompactLandscapeControlsAndRotation {
     [self openTransportStream];

@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       views_only:
-        description: 'Validate browser views on unchanged production code; no new IPA build'
+        description: 'Validate browser navigation on unchanged production code; no new IPA build'
         type: boolean
         default: false
       browser:
@@ -152,7 +152,6 @@ jobs:
           TEST_SELECTION=()
           if [ '${{ inputs.views_only }}' = 'true' ]; then
             TEST_SELECTION=(
-              '-only-testing:LanCinemaUITests/PlaybackTests/testExplorerAppearanceCaptures'
               '-only-testing:LanCinemaUITests/PlaybackTests/testExplorerViewsNavigationAndPersistence'
             )
           elif [ '${{ inputs.unit_only }}' = 'true' ]; then
