@@ -260,6 +260,64 @@
     [[self visibleButton:@"图标"] tap];
     [self capture:@"explorer-icons-dark-large"];
 }
+- (void)assertThumbnailPixels:(XCUIElement *)tile {
+    BOOL hasFrame = NO;
+    for (NSInteger attempt = 0; attempt < 12 && !hasFrame; attempt++) {
+        CGImageRef source = tile.screenshot.image.CGImage;
+        CGFloat width = CGImageGetWidth(source);
+        // Sample only the cover area, excluding the filename and metadata.
+        CGImageRef crop = CGImageCreateWithImageInRect(source, CGRectMake(width*.15, width*.12, width*.7, width*.3));
+        unsigned char pixels[32*32*4] = {0};
+        CGColorSpaceRef color = CGColorSpaceCreateDeviceRGB();
+        CGContextRef context = CGBitmapContextCreate(pixels, 32, 32, 8, 32*4, color, kCGImageAlphaPremultipliedLast);
+        CGContextDrawImage(context, CGRectMake(0,0,32,32), crop);
+        NSUInteger red = 0, green = 0, blue = 0;
+        for (NSUInteger i = 0; i < 32*32; i++) {
+            int r = pixels[i*4], g = pixels[i*4+1], b = pixels[i*4+2];
+            red += r > 130 && r > g+40 && r > b+40;
+            green += g > 130 && g > r+40 && g > b+40;
+            blue += b > 130 && b > r+40 && b > g+40;
+        }
+        CGContextRelease(context); CGColorSpaceRelease(color); CGImageRelease(crop);
+        hasFrame = red > 30 && green > 30 && blue > 30;
+        if (!hasFrame) {
+            XCTestExpectation *wait = [self expectationWithDescription:@"Visible video thumbnail arrives"];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [wait fulfill]; });
+            [self waitForExpectationsWithTimeout:3 handler:nil];
+        }
+    }
+    XCTAssertTrue(hasFrame, @"The tile must show multicolor video pixels, not the generic teal play icon: %@", tile.label);
+}
+- (void)testVideoThumbnails {
+    XCTAssertTrue([self.app.staticTexts[@"符号+ &%# 测试"] waitForExistenceWithTimeout:20]);
+    [self.app.staticTexts[@"符号+ &%# 测试"] tap];
+    XCTAssertTrue([self.app.staticTexts[@"封面预览"] waitForExistenceWithTimeout:10]);
+    [self.app.staticTexts[@"封面预览"] tap];
+    [[self visibleButton:@"文件视图"] tap];
+    [[self visibleButton:@"图标"] tap];
+    XCUIElement *mkv = [self visibleButton:@"横屏视频.mkv"];
+    XCUIElement *ts = [self visibleButton:@"长名称视频完整换行与封面同时显示.ts"];
+    XCTAssertTrue([mkv waitForExistenceWithTimeout:10]);
+    [self assertThumbnailPixels:mkv];
+    [self assertThumbnailPixels:ts];
+    XCTAssertTrue([self visibleButton:@"无法取帧.mp4"].exists);
+    XCTAssertTrue([self visibleButton:@"字幕.srt"].exists);
+    [self capture:@"thumbnails-icons-portrait"];
+    [[self visibleButton:@"文件视图"] tap];
+    [[self visibleButton:@"详细信息"] tap];
+    [self capture:@"thumbnails-details-portrait"];
+    [[self visibleButton:@"文件视图"] tap];
+    [[self visibleButton:@"图标"] tap];
+    // Cell recreation must restore the correct previews without losing labels.
+    [self assertThumbnailPixels:[self visibleButton:@"横屏视频.mkv"]];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationLandscapeLeft;
+    [self capture:@"thumbnails-icons-landscape"];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationPortrait;
+    [[self visibleButton:@"横屏视频.mkv"] tap];
+    [self waitForPlaybackSecondsFrom:1 to:50];
+    [self assertVideoFramesAdvance:@"thumbnail-open-video"];
+    [self closePlayback];
+}
 - (void)testExplorerViewsNavigationAndPersistence {
     XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
     XCTAssertEqualObjects([self visibleButton:@"文件视图"].value, @"详细信息");

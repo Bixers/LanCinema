@@ -16,4 +16,10 @@ if __name__ == '__main__':
         parent = special / name
         parent.mkdir(exist_ok=True)
         shutil.copyfile(root / '演示文件夹' / '测试视频.mkv', parent / '重复名称.mkv')
+    covers = special / '封面预览'
+    covers.mkdir(exist_ok=True)
+    shutil.copyfile(root / '演示文件夹' / '测试视频.mkv', covers / '横屏视频.mkv')
+    shutil.copyfile(root / '演示文件夹' / '时间戳偏移测试.ts', covers / '长名称视频完整换行与封面同时显示.ts')
+    (covers / '无法取帧.mp4').write_bytes(b'not a video')
+    (covers / '字幕.srt').write_text('1\n00:00:00,000 --> 00:00:02,000\nSynthetic subtitle', encoding='utf-8')
     MediaServer(('127.0.0.1', 8123), root, 'ui-test-access-code').serve_forever()

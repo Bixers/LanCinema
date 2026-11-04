@@ -1,4 +1,5 @@
 #import "FilePresentation.h"
+#import "FileThumbnail.h"
 
 BOOL LCFileColumnsAreWide(CGFloat width, UITraitCollection *traits) {
     return width >= 650 && !UIContentSizeCategoryIsAccessibilityCategory(traits.preferredContentSizeCategory);
@@ -29,7 +30,7 @@ UIStackView *LCFileColumns(NSArray<UIView *> *views, BOOL wide) {
     return stack;
 }
 
-UIView *LCFileEntry(NSDictionary *item, NSString *extra, BOOL icons, BOOL wide, UITraitCollection *traits) {
+UIView *LCFileEntry(NSDictionary *item, NSString *extra, BOOL icons, BOOL wide, UITraitCollection *traits, NSURL *thumbnailURL, NSString *libraryID) {
     BOOL folder = [item[@"directory"] boolValue];
     BOOL video = [item[@"video"] boolValue];
     BOOL subtitle = [item[@"subtitle"] boolValue];
@@ -37,12 +38,14 @@ UIView *LCFileEntry(NSDictionary *item, NSString *extra, BOOL icons, BOOL wide, 
     NSString *type = folder ? @"文件夹" : (ext.length ? [ext stringByAppendingString:subtitle ? @" 字幕" : (video ? @" 视频" : @" 文件")] : @"文件");
     NSString *size = folder ? @"—" : [NSByteCountFormatter stringFromByteCount:[item[@"size"] longLongValue] countStyle:NSByteCountFormatterCountStyleFile];
     NSString *date = [item[@"modified"] isKindOfClass:NSNumber.class] ? [NSDateFormatter localizedStringFromDate:[NSDate dateWithTimeIntervalSince1970:[item[@"modified"] doubleValue]] dateStyle:NSDateFormatterShortStyle timeStyle:NSDateFormatterShortStyle] : @"—";
-    UIImageView *image = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:folder ? @"folder.fill" : (subtitle ? @"captions.bubble" : (video ? @"play.rectangle.fill" : @"doc.fill"))]];
-    image.preferredSymbolConfiguration = [UIImageSymbolConfiguration configurationWithPointSize:icons ? 48 : 24 weight:UIImageSymbolWeightRegular];
-    image.contentMode = UIViewContentModeScaleAspectFit;
-    image.tintColor = folder ? UIColor.systemYellowColor : (subtitle ? UIColor.secondaryLabelColor : UIColor.systemTealColor);
-    [image.widthAnchor constraintEqualToConstant:icons ? 64 : 30].active = YES;
-    [image.heightAnchor constraintEqualToConstant:icons ? 60 : 32].active = YES;
+    NSString *key = [NSString stringWithFormat:@"%@|%@|%@", thumbnailURL.absoluteString, libraryID, item[@"thumbnailVersion"] ?: item[@"modified"]];
+    UIView *image = [[LCFileThumbnail alloc] initWithSymbol:folder ? @"folder.fill" : (subtitle ? @"captions.bubble" : (video ? @"play.rectangle.fill" : @"doc.fill"))
+        color:folder ? UIColor.systemYellowColor : (subtitle ? UIColor.secondaryLabelColor : UIColor.systemTealColor)
+        large:icons URL:video && !folder ? thumbnailURL : nil cacheKey:key];
+    if (!icons) {
+        [image.widthAnchor constraintEqualToConstant:30].active = YES;
+        [image.heightAnchor constraintEqualToConstant:32].active = YES;
+    }
     UILabel *name = FileLabel(item[@"name"], UIFontTextStyleBody);
     name.accessibilityIdentifier = @"file-name";
     UILabel *detail = FileLabel(extra, UIFontTextStyleCaption1);
@@ -56,6 +59,8 @@ UIView *LCFileEntry(NSDictionary *item, NSString *extra, BOOL icons, BOOL wide, 
     identity.alignment = icons ? UIStackViewAlignmentCenter : UIStackViewAlignmentTop;
     identity.spacing = icons ? 8 : 10;
     if (icons) {
+        [image.widthAnchor constraintEqualToAnchor:identity.widthAnchor].active = YES;
+        [image.heightAnchor constraintEqualToAnchor:image.widthAnchor multiplier:9.0/16.0].active = YES;
         name.textAlignment = NSTextAlignmentCenter;
         detail.textAlignment = NSTextAlignmentCenter;
         UILabel *caption = FileLabel(folder ? type : [NSString stringWithFormat:@"%@ · %@", ext, size], UIFontTextStyleCaption1);

@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 from playback_cache import PlaybackCache, TRANSPORT_STREAMS
 from shared_library import normalize_roots, mount_names
+from thumbnails import ThumbnailCache
 
 ROOT = Path(r"G:\123")
 VIDEO = {'.mp4', '.mkv', '.avi', '.mov', '.m4v', '.webm', '.wmv', '.flv', '.ts', '.m2ts', '.mts', '.mpg', '.mpeg', '.vob', '.3gp', '.ogv', '.rm', '.rmvb', '.asf', '.divx'}
@@ -34,6 +35,7 @@ class MediaServer(ThreadingHTTPServer):
         identity = json.dumps(sorted(str(p) for p in self.roots), ensure_ascii=False) if self.mounts else str(self.root)
         self.library_id = hashlib.sha256(identity.encode()).hexdigest()[:16]
         self.playback_cache = PlaybackCache()
+        self.thumbnail_cache = ThumbnailCache()
         super().__init__(address, Handler)
 
     def server_close(self):
@@ -92,6 +94,7 @@ class Handler(BaseHTTPRequestHandler):
         return {'name': entry.name, 'path': prefix + entry.relative_to(root).as_posix(),
                 'directory': directory, 'size': 0 if directory else metadata.st_size,
                 'modified': metadata.st_mtime,
+                'thumbnailVersion': f'{metadata.st_size}:{metadata.st_mtime_ns}',
                 'video': entry.suffix.lower() in VIDEO, 'subtitle': entry.suffix.lower() in SUBTITLES}
 
     def search(self, start, keyword, root, prefix):
@@ -138,7 +141,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.error(401, '访问码不正确')
             if route.path == '/api/info':
                 return self.reply(200, json.dumps({'name': socket.gethostname(), 'root': self.server.root_label, 'libraryID': self.server.library_id}, ensure_ascii=False).encode())
-            if route.path not in ('/api/list', '/api/search', '/api/crop', '/api/playback', '/media'):
+            if route.path not in ('/api/list', '/api/search', '/api/crop', '/api/playback', '/api/thumbnail', '/media'):
                 return self.error(404, '接口不存在')
             relative = query.get('path', [''])[0]
             if not relative and self.server.mounts:
@@ -166,6 +169,11 @@ class Handler(BaseHTTPRequestHandler):
                     'root': self.server.root_label, 'libraryID': self.server.library_id}, ensure_ascii=False).encode())
             root, prefix, _ = self.scope(relative)
             path = self.resolve(relative)
+            if route.path == '/api/thumbnail':
+                if not path.is_file() or path.suffix.lower() not in VIDEO:
+                    return self.error(400, '不是视频文件')
+                status, data = self.server.thumbnail_cache.get(path)
+                return self.reply(status, data, 'image/jpeg', {'Retry-After': '2'} if status == 503 else None)
             if route.path == '/api/playback':
                 if not path.is_file() or path.suffix.lower() not in TRANSPORT_STREAMS:
                     return self.error(400, '不是 TS 视频')

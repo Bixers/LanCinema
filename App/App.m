@@ -1382,7 +1382,8 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         NSInteger index = indexPath.row * columns + col;
         if (index >= self.visibleItems.count) { [row addArrangedSubview:[UIView new]]; continue; }
         NSDictionary *item = self.visibleItems[index];
-        UIView *entry = LCFileEntry(item, [self extraForItem:item], [self usesIcons], self.wideFileColumns, self.traitCollection);
+        UIView *entry = LCFileEntry(item, [self extraForItem:item], [self usesIcons], self.wideFileColumns, self.traitCollection,
+                                   ServiceURL(@"/api/thumbnail", item[@"path"]), [NSUserDefaults.standardUserDefaults stringForKey:@"libraryID"] ?: @"");
         if ([self usesIcons]) {
             UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
             button.accessibilityLabel = item[@"name"];

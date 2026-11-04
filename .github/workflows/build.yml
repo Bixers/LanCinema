@@ -84,7 +84,7 @@ jobs:
       - name: Run server checks
         run: |
           python3 -m pip install --break-system-packages imageio-ffmpeg
-          cd server && python3 -m unittest -v test_server.py test_multi_root.py test_video_probe.py test_playback_cache.py
+          cd server && python3 -m unittest -v test_server.py test_multi_root.py test_video_probe.py test_playback_cache.py test_thumbnails.py
       - name: Boot simulator
         timeout-minutes: 9
         run: |
@@ -153,6 +153,8 @@ jobs:
             TEST_SELECTION=(
               '-only-testing:LanCinemaUITests/PlaybackTests/testExplorerAppearanceCaptures'
               '-only-testing:LanCinemaUITests/PlaybackTests/testExplorerViewsNavigationAndPersistence'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testVideoThumbnails'
+              '-only-testing:LanCinemaTests'
             )
           elif [ '${{ inputs.unit_only }}' = 'true' ]; then
             TEST_SELECTION=('-only-testing:LanCinemaTests')
