@@ -145,6 +145,9 @@ jobs:
             TEST_SELECTION=('-only-testing:LanCinemaTests')
           elif [ '${{ inputs.focused }}' = 'true' ]; then
             TEST_SELECTION=(
+              '-only-testing:LanCinemaUITests/PlaybackTests/testExplorerViewsNavigationAndPersistence'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testSortingMenuAndSavedChoice'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testRecursiveSearchAndWrappedNames'
               '-only-testing:LanCinemaUITests/PlaybackTests/testSpecialCharacterFolderSearchAndPlayback'
               '-only-testing:LanCinemaUITests/PlaybackTests/testAutomaticFillAndSavedDisplayMode'
               '-only-testing:LanCinemaUITests/PlaybackTests/testSmartCropKeepsSubtitlesVisible'

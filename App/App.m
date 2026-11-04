@@ -5,6 +5,7 @@
 #import "Connection.h"
 #import "AudioOutput.h"
 #import "FileSort.h"
+#import "FilePresentation.h"
 #import "VideoGeometry.h"
 
 // Public libvlc frame-step API; use the same owning-player bridge as audio.
@@ -990,11 +991,14 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 @property(nonatomic) NSInteger skippedSearchItems;
 @property(nonatomic) BOOL itemsLoaded;
 @property(nonatomic, strong) UIBarButtonItem *sortButton;
+@property(nonatomic, strong) UIBarButtonItem *viewButton;
+@property(nonatomic) NSInteger layoutColumns;
+@property(nonatomic) BOOL wideFileColumns;
 @end
 
 @implementation BrowserController
 - (instancetype)initWithFolder:(NSString *)folder title:(NSString *)title {
-    if ((self = [super initWithStyle:UITableViewStyleInsetGrouped])) { self.folder = folder; self.title = title; }
+    if ((self = [super initWithStyle:UITableViewStylePlain])) { self.folder = folder; self.title = title; }
     return self;
 }
 - (void)viewDidLoad {
@@ -1005,12 +1009,17 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     self.tableView.estimatedRowHeight = 76;
     self.tableView.sectionHeaderHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedSectionHeaderHeight = 44;
-    self.navigationItem.largeTitleDisplayMode = self.folder.length ? UINavigationItemLargeTitleDisplayModeNever : UINavigationItemLargeTitleDisplayModeAutomatic;
+    self.tableView.backgroundColor = UIColor.systemBackgroundColor;
+    self.tableView.separatorInset = UIEdgeInsetsMake(0, 16, 0, 16);
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
     UIBarButtonItem *connection = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"network"] style:UIBarButtonItemStylePlain target:self action:@selector(settings)];
     connection.accessibilityLabel = @"电脑连接设置";
     self.sortButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.up.arrow.down"] menu:nil];
     self.sortButton.accessibilityLabel = @"排序";
-    self.navigationItem.rightBarButtonItems = @[connection, self.sortButton];
+    self.viewButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"square.grid.2x2"] menu:nil];
+    self.viewButton.accessibilityLabel = @"文件视图";
+    self.navigationItem.rightBarButtonItems = @[connection, self.viewButton, self.sortButton];
+    [self updateViewMenu];
     [self updateSortMenu];
     UISearchController *search = [[UISearchController alloc] initWithSearchResultsController:nil];
     search.searchResultsUpdater = self;
@@ -1051,8 +1060,152 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 }
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
+    [self updateViewMenu];
     [self updateSortMenu];
     [self loadFolder];
+}
+- (BOOL)usesIcons { return [NSUserDefaults.standardUserDefaults boolForKey:@"fileIconView"]; }
+- (NSInteger)fileColumnCount {
+    if (![self usesIcons]) return 1;
+    CGFloat width = self.tableView.bounds.size.width - self.tableView.safeAreaInsets.left - self.tableView.safeAreaInsets.right;
+    if (UIContentSizeCategoryIsAccessibilityCategory(self.traitCollection.preferredContentSizeCategory)) return 1;
+    return MAX(1, MIN(5, (NSInteger)(width / 170)));
+}
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    BOOL wide = LCFileColumnsAreWide(self.tableView.bounds.size.width - self.tableView.safeAreaInsets.left - self.tableView.safeAreaInsets.right, self.traitCollection);
+    NSInteger columns = [self fileColumnCount];
+    if (columns != self.layoutColumns || wide != self.wideFileColumns) {
+        self.layoutColumns = columns; self.wideFileColumns = wide;
+        [self.tableView reloadData];
+    }
+}
+- (void)traitCollectionDidChange:(UITraitCollection *)previous {
+    [super traitCollectionDidChange:previous];
+    if (![previous.preferredContentSizeCategory isEqual:self.traitCollection.preferredContentSizeCategory]) {
+        self.layoutColumns = 0;
+        [self.tableView setNeedsLayout];
+        [self.tableView reloadData];
+    }
+}
+- (void)updateViewMenu {
+    __weak typeof(self) owner = self;
+    NSMutableArray *actions = [NSMutableArray new];
+    for (NSNumber *value in @[@NO, @YES]) {
+        BOOL icons = value.boolValue;
+        UIAction *action = [UIAction actionWithTitle:icons ? @"图标" : @"详细信息" image:[UIImage systemImageNamed:icons ? @"square.grid.2x2" : @"list.bullet"] identifier:nil handler:^(UIAction *a) {
+            [NSUserDefaults.standardUserDefaults setBool:icons forKey:@"fileIconView"];
+            [owner updateViewMenu];
+            [owner.tableView reloadData];
+        }];
+        action.state = icons == [self usesIcons] ? UIMenuElementStateOn : UIMenuElementStateOff;
+        [actions addObject:action];
+    }
+    self.viewButton.menu = [UIMenu menuWithTitle:@"查看" children:actions];
+    self.viewButton.accessibilityValue = [self usesIcons] ? @"图标" : @"详细信息";
+    self.viewButton.image = [UIImage systemImageNamed:[self usesIcons] ? @"square.grid.2x2" : @"list.bullet"];
+    self.tableView.separatorStyle = [self usesIcons] ? UITableViewCellSeparatorStyleNone : UITableViewCellSeparatorStyleSingleLine;
+}
+- (void)navigateToFolder:(NSString *)path title:(NSString *)title {
+    [self.navigationItem.searchController.searchBar resignFirstResponder];
+    for (BrowserController *controller in self.navigationController.viewControllers) {
+        if ([controller isKindOfClass:BrowserController.class] && [controller.folder isEqual:path]) {
+            controller.navigationItem.searchController.active = NO;
+            controller.navigationItem.searchController.searchBar.text = @"";
+            [self.navigationController popToViewController:controller animated:YES];
+            return;
+        }
+    }
+    [self.navigationController pushViewController:[[BrowserController alloc] initWithFolder:path title:title] animated:YES];
+}
+- (void)goToParent {
+    [self navigateToFolder:[self.folder stringByDeletingLastPathComponent] title:[self.folder stringByDeletingLastPathComponent].lastPathComponent];
+}
+- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
+    UITableViewHeaderFooterView *header = [[UITableViewHeaderFooterView alloc] initWithReuseIdentifier:nil];
+    header.contentView.backgroundColor = UIColor.secondarySystemBackgroundColor;
+    UIButton *path = [UIButton buttonWithType:UIButtonTypeSystem];
+    UIButtonConfiguration *config = [UIButtonConfiguration plainButtonConfiguration];
+    NSString *root = @"共享文件夹";
+    config.title = self.folder.length ? [root stringByAppendingFormat:@" / %@", self.folder] : root;
+    config.image = [UIImage systemImageNamed:@"folder"];
+    config.imagePadding = 8;
+    config.contentInsets = NSDirectionalEdgeInsetsMake(8, 0, 8, 0);
+    config.titleLineBreakMode = NSLineBreakByCharWrapping;
+    path.configuration = config;
+    path.titleLabel.numberOfLines = 0;
+    path.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeading;
+    path.accessibilityLabel = @"文件夹路径";
+    path.accessibilityValue = config.title;
+    [path.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+    NSMutableArray *ancestors = [NSMutableArray new];
+    __weak typeof(self) owner = self;
+    [ancestors addObject:[UIAction actionWithTitle:@"共享文件夹" image:[UIImage systemImageNamed:@"house"] identifier:nil handler:^(UIAction *a) { [owner navigateToFolder:@"" title:@"局域影院"]; }]];
+    NSString *prefix = @"";
+    for (NSString *part in self.folder.pathComponents) {
+        prefix = [prefix stringByAppendingPathComponent:part];
+        NSString *target = prefix;
+        UIAction *action = [UIAction actionWithTitle:part image:[UIImage systemImageNamed:@"folder"] identifier:nil handler:^(UIAction *a) { [owner navigateToFolder:target title:part]; }];
+        if ([target isEqual:self.folder]) action.attributes = UIMenuElementAttributesDisabled;
+        [ancestors addObject:action];
+    }
+    path.menu = [UIMenu menuWithTitle:@"跳转到文件夹" children:ancestors];
+    path.showsMenuAsPrimaryAction = YES;
+    UIButton *up = [UIButton buttonWithType:UIButtonTypeSystem];
+    [up setImage:[UIImage systemImageNamed:@"arrow.up"] forState:UIControlStateNormal];
+    up.accessibilityLabel = @"上一级文件夹";
+    up.enabled = self.folder.length > 0;
+    [up addTarget:self action:@selector(goToParent) forControlEvents:UIControlEventTouchUpInside];
+    [up.widthAnchor constraintEqualToConstant:44].active = YES;
+    [up.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+    UIStackView *location = [[UIStackView alloc] initWithArrangedSubviews:@[path, up]];
+    location.spacing = 8;
+    UIStackView *content = [[UIStackView alloc] initWithArrangedSubviews:@[location]];
+    content.axis = UILayoutConstraintAxisVertical;
+    if (![self usesIcons]) {
+        NSMutableArray *buttons = [NSMutableArray new];
+        NSArray *keys = @[@"name", @"size", @"type", @"modified"];
+        NSArray *titles = @[@"名称", @"大小", @"类型", @"修改时间"];
+        for (NSInteger i = 0; i < keys.count; i++) {
+            NSString *key = keys[i];
+            UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+            BOOL selected = [[self sortKey] isEqual:key];
+            NSString *title = titles[i];
+            UIButtonConfiguration *style = [UIButtonConfiguration plainButtonConfiguration];
+            style.title = title;
+            if (selected) {
+                style.image = [UIImage systemImageNamed:[NSUserDefaults.standardUserDefaults boolForKey:@"fileSortDescending"] ? @"chevron.down" : @"chevron.up"];
+                style.imagePlacement = NSDirectionalRectEdgeTrailing;
+                style.imagePadding = 4;
+                style.preferredSymbolConfigurationForImage = [UIImageSymbolConfiguration configurationWithPointSize:10 weight:UIImageSymbolWeightSemibold];
+            }
+            style.contentInsets = NSDirectionalEdgeInsetsMake(6, 0, 6, 0);
+            style.baseForegroundColor = selected ? UIColor.systemTealColor : UIColor.secondaryLabelColor;
+            button.configuration = style;
+            button.titleLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
+            button.titleLabel.numberOfLines = 0;
+            button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeading;
+            button.accessibilityLabel = [@"按" stringByAppendingFormat:@"%@排序", title];
+            button.accessibilityValue = selected ? [self sortDescription] : @"";
+            [button.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+            [button addAction:[UIAction actionWithHandler:^(UIAction *a) {
+                BOOL reverse = [[owner sortKey] isEqual:key] ? ![NSUserDefaults.standardUserDefaults boolForKey:@"fileSortDescending"] : [key isEqual:@"modified"];
+                [NSUserDefaults.standardUserDefaults setObject:key forKey:@"fileSortKey"];
+                [NSUserDefaults.standardUserDefaults setBool:reverse forKey:@"fileSortDescending"];
+                [owner applyFileSort];
+            }] forControlEvents:UIControlEventTouchUpInside];
+            [buttons addObject:button];
+        }
+        [content addArrangedSubview:LCFileColumns(buttons, self.wideFileColumns)];
+    }
+    content.translatesAutoresizingMaskIntoConstraints = NO;
+    [header.contentView addSubview:content];
+    [NSLayoutConstraint activateConstraints:@[
+        [content.leadingAnchor constraintEqualToAnchor:header.contentView.layoutMarginsGuide.leadingAnchor],
+        [content.trailingAnchor constraintEqualToAnchor:header.contentView.layoutMarginsGuide.trailingAnchor],
+        [content.topAnchor constraintEqualToAnchor:header.contentView.topAnchor],
+        [content.bottomAnchor constraintEqualToAnchor:header.contentView.bottomAnchor]]];
+    return header;
 }
 - (NSString *)sortKey {
     NSString *key = [NSUserDefaults.standardUserDefaults stringForKey:@"fileSortKey"];
@@ -1174,64 +1327,83 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     self.connectButton.hidden = YES;
     [self applyFileSort];
 }
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.visibleItems.count; }
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return self.folder.length ? self.folder : [[NSUserDefaults.standardUserDefaults stringForKey:@"sharedRoot"] ?: @"共享文件夹" stringByAppendingString:@" · 只读文件库"]; }
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (self.navigationItem.searchController.searchBar.text.length) {
-        NSString *summary = [NSString stringWithFormat:@"搜索当前文件夹及所有子文件夹 · %lu 项", (unsigned long)self.visibleItems.count];
-        if (self.skippedSearchItems > 0) summary = [summary stringByAppendingFormat:@"\n%ld 个项目无法读取或不在搜索范围内", (long)self.skippedSearchItems];
-        return [summary stringByAppendingFormat:@"\n%@ · 文件夹优先", [self sortDescription]];
-    }
-    return [NSString stringWithFormat:@"%@ · 文件夹优先\n点击文件夹进入 · 点击视频播放", [self sortDescription]];
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    NSInteger columns = [self fileColumnCount];
+    return (self.visibleItems.count + columns - 1) / columns;
 }
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"file"];
-    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"file"];
-    NSDictionary *item = self.visibleItems[indexPath.row];
-    BOOL folder = [item[@"directory"] boolValue];
-    BOOL video = [item[@"video"] boolValue];
-    cell.textLabel.text = item[@"name"];
-    cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
-    cell.textLabel.adjustsFontForContentSizeCategory = YES;
-    cell.textLabel.numberOfLines = 0;
-    cell.textLabel.lineBreakMode = NSLineBreakByCharWrapping;
-    cell.detailTextLabel.text = folder ? @"文件夹" : [NSByteCountFormatter stringFromByteCount:[item[@"size"] longLongValue] countStyle:NSByteCountFormatterCountStyleFile];
-    if ([[self sortKey] isEqual:@"modified"]) {
-        NSString *date = [item[@"modified"] isKindOfClass:NSNumber.class] ? [NSDateFormatter localizedStringFromDate:[NSDate dateWithTimeIntervalSince1970:[item[@"modified"] doubleValue]] dateStyle:NSDateFormatterShortStyle timeStyle:NSDateFormatterShortStyle] : @"修改时间不可用，请更新电脑端";
-        cell.detailTextLabel.text = [cell.detailTextLabel.text stringByAppendingFormat:@" · %@", date];
-    } else if ([[self sortKey] isEqual:@"type"] && !folder) {
-        NSString *extension = [item[@"name"] pathExtension].uppercaseString;
-        cell.detailTextLabel.text = [cell.detailTextLabel.text stringByAppendingFormat:@" · %@", extension.length ? extension : @"无扩展名"];
-    }
-    cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
-    cell.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
-    cell.detailTextLabel.adjustsFontForContentSizeCategory = YES;
-    if (!folder) {
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    NSUInteger folders = 0;
+    for (NSDictionary *item in self.visibleItems) if ([item[@"directory"] boolValue]) folders++;
+    NSString *summary = [NSString stringWithFormat:@"%lu 个文件夹 · %lu 个文件", (unsigned long)folders, (unsigned long)(self.visibleItems.count - folders)];
+    if (self.navigationItem.searchController.searchBar.text.length) summary = [@"搜索当前文件夹及子文件夹 · " stringByAppendingString:summary];
+    if (self.skippedSearchItems > 0) summary = [summary stringByAppendingFormat:@"\n%ld 个项目无法读取或不在搜索范围内", (long)self.skippedSearchItems];
+    return [summary stringByAppendingFormat:@"\n%@ · 文件夹优先", [self sortDescription]];
+}
+- (NSString *)extraForItem:(NSDictionary *)item {
+    NSMutableArray *lines = [NSMutableArray new];
+    if (![item[@"directory"] boolValue]) {
         NSString *key = [NSString stringWithFormat:@"progress:%@:%@", [[NSUserDefaults.standardUserDefaults stringForKey:HostKey] stringByAppendingFormat:@":%@", [NSUserDefaults.standardUserDefaults stringForKey:@"libraryID"] ?: @""], item[@"path"]];
         double progress = [NSUserDefaults.standardUserDefaults doubleForKey:key];
-        if (progress > 0) cell.detailTextLabel.text = [cell.detailTextLabel.text stringByAppendingFormat:@"  ·  上次 %@", ClockText(progress)];
+        if (progress > 0) [lines addObject:[@"上次 " stringByAppendingString:ClockText(progress)]];
     }
     if (self.navigationItem.searchController.searchBar.text.length) {
         NSString *parent = [item[@"path"] stringByDeletingLastPathComponent];
-        cell.detailTextLabel.text = [cell.detailTextLabel.text stringByAppendingFormat:@"\n%@", parent.length ? [[[NSUserDefaults.standardUserDefaults stringForKey:@"sharedRoot"] ?: @"共享文件夹" stringByAppendingString:@"/"] stringByAppendingString:parent] : ([NSUserDefaults.standardUserDefaults stringForKey:@"sharedRoot"] ?: @"共享文件夹")];
+        [lines addObject:parent.length ? [@"位置：" stringByAppendingString:parent] : @"位置：共享文件夹"];
     }
-    cell.detailTextLabel.numberOfLines = 0;
-    cell.detailTextLabel.lineBreakMode = NSLineBreakByCharWrapping;
-    cell.imageView.image = [UIImage systemImageNamed:folder ? @"folder.fill" : (video ? @"play.rectangle.fill" : @"doc")];
-    cell.imageView.tintColor = folder ? UIColor.systemMintColor : UIColor.systemTealColor;
-    cell.accessoryType = folder ? UITableViewCellAccessoryDisclosureIndicator : UITableViewCellAccessoryNone;
-    return cell;
+    return [lines componentsJoinedByString:@"\n"];
 }
-- (void)tableView:(UITableView *)tableView willDisplayHeaderView:(UIView *)view forSection:(NSInteger)section {
-    if ([view isKindOfClass:UITableViewHeaderFooterView.class]) {
-        UILabel *label = ((UITableViewHeaderFooterView *)view).textLabel;
-        label.numberOfLines = 0;
-        label.lineBreakMode = NSLineBreakByCharWrapping;
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSString *reuse = [self usesIcons] ? @"file-icons" : @"file-details";
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:reuse];
+    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:reuse];
+    for (UIView *view in cell.contentView.subviews) [view removeFromSuperview];
+    cell.backgroundColor = UIColor.systemBackgroundColor;
+    cell.selectionStyle = [self usesIcons] ? UITableViewCellSelectionStyleNone : UITableViewCellSelectionStyleDefault;
+    NSInteger columns = [self fileColumnCount];
+    UIStackView *row = [UIStackView new];
+    row.axis = UILayoutConstraintAxisHorizontal;
+    row.alignment = UIStackViewAlignmentTop;
+    row.distribution = UIStackViewDistributionFillEqually;
+    row.spacing = 16;
+    for (NSInteger col = 0; col < columns; col++) {
+        NSInteger index = indexPath.row * columns + col;
+        if (index >= self.visibleItems.count) { [row addArrangedSubview:[UIView new]]; continue; }
+        NSDictionary *item = self.visibleItems[index];
+        UIView *entry = LCFileEntry(item, [self extraForItem:item], [self usesIcons], self.wideFileColumns);
+        if ([self usesIcons]) {
+            UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
+            button.accessibilityLabel = item[@"name"];
+            button.accessibilityValue = [item[@"directory"] boolValue] ? @"文件夹" : @"文件";
+            entry.userInteractionEnabled = NO;
+            entry.translatesAutoresizingMaskIntoConstraints = NO;
+            [button addSubview:entry];
+            [NSLayoutConstraint activateConstraints:@[
+                [entry.leadingAnchor constraintEqualToAnchor:button.leadingAnchor constant:4],
+                [entry.trailingAnchor constraintEqualToAnchor:button.trailingAnchor constant:-4],
+                [entry.topAnchor constraintEqualToAnchor:button.topAnchor constant:8],
+                [entry.bottomAnchor constraintEqualToAnchor:button.bottomAnchor constant:-8],
+                [button.heightAnchor constraintGreaterThanOrEqualToConstant:100]]];
+            __weak typeof(self) owner = self;
+            [button addAction:[UIAction actionWithHandler:^(UIAction *a) { [owner openFileItem:item]; }] forControlEvents:UIControlEventTouchUpInside];
+            [row addArrangedSubview:button];
+        } else {
+            [row addArrangedSubview:entry];
+        }
     }
+    row.translatesAutoresizingMaskIntoConstraints = NO;
+    [cell.contentView addSubview:row];
+    [NSLayoutConstraint activateConstraints:@[
+        [row.leadingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.leadingAnchor],
+        [row.trailingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.trailingAnchor],
+        [row.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:12],
+        [row.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-12]]];
+    return cell;
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    NSDictionary *item = self.visibleItems[indexPath.row];
+    if (![self usesIcons]) [self openFileItem:self.visibleItems[indexPath.row]];
+}
+- (void)openFileItem:(NSDictionary *)item {
     if ([item[@"directory"] boolValue]) {
         BrowserController *next = [[BrowserController alloc] initWithFolder:item[@"path"] title:item[@"name"]];
         [self.navigationController pushViewController:next animated:YES];
@@ -1240,7 +1412,6 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         [a addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:a animated:YES completion:nil];
     } else {
-        // Unknown extensions may still contain formats VLC can recognize.
         PlayerController *player = [PlayerController new];
         player.item = item;
         NSString *parent = [item[@"path"] stringByDeletingLastPathComponent];
