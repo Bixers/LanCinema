@@ -1386,7 +1386,12 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         if ([self usesIcons]) {
             UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
             button.accessibilityLabel = item[@"name"];
-            button.accessibilityValue = [item[@"directory"] boolValue] ? @"文件夹" : @"文件";
+            BOOL folder = [item[@"directory"] boolValue];
+            NSString *type = [item[@"name"] pathExtension].uppercaseString;
+            NSString *kind = [item[@"subtitle"] boolValue] ? @"字幕" : ([item[@"video"] boolValue] ? @"视频" : @"文件");
+            NSString *metadata = folder ? @"文件夹" : [NSString stringWithFormat:@"%@ %@，%@", type, kind, [NSByteCountFormatter stringFromByteCount:[item[@"size"] longLongValue] countStyle:NSByteCountFormatterCountStyleFile]];
+            NSString *extra = [self extraForItem:item];
+            button.accessibilityValue = extra.length ? [metadata stringByAppendingFormat:@"，%@", extra] : metadata;
             entry.userInteractionEnabled = NO;
             entry.translatesAutoresizingMaskIntoConstraints = NO;
             [button addSubview:entry];

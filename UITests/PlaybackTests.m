@@ -290,14 +290,32 @@
     XCTAssertTrue([[self visibleButton:@"演示文件夹"] waitForExistenceWithTimeout:20]);
     XCTAssertEqualObjects([self visibleButton:@"文件视图"].value, @"图标");
     XCTAssertEqualObjects([self visibleButton:@"排序"].value, @"大小 · 从大到小");
-    [[self visibleButton:@"演示文件夹"] tap];
-    // Use the moving test pattern; the subtitle framing fixture is static.
-    XCUIElement *video = [self visibleButton:@"测试视频.mkv"];
-    XCTAssertTrue([video waitForExistenceWithTimeout:10]);
+    // Search from the restored icon view, including same-named files in two parents.
+    [self.app.searchFields.firstMatch tap];
+    [self.app.searchFields.firstMatch typeText:@"重复名称.mkv"];
+    XCUIElementQuery *hits = [self.app.buttons matchingIdentifier:@"重复名称.mkv"];
+    XCTAssertTrue([hits.firstMatch waitForExistenceWithTimeout:20]);
+    XCTAssertEqual(hits.count, 2);
+    NSMutableSet *locations = [NSMutableSet new];
+    for (XCUIElement *hit in hits.allElementsBoundByIndex) {
+        NSString *value = hit.value;
+        XCTAssertTrue([value containsString:@"MKV 视频"]);
+        XCTAssertTrue([value containsString:@"MB"]);
+        if ([value hasSuffix:@"位置：符号+ &%# 测试/A"]) [locations addObject:@"A"];
+        if ([value hasSuffix:@"位置：符号+ &%# 测试/B"]) [locations addObject:@"B"];
+    }
+    XCTAssertEqual(locations.count, 2, @"VoiceOver must distinguish identical filenames by their parent path");
+    [self capture:@"explorer-icons-search-accessibility"];
+    XCUIElement *video = hits.firstMatch;
     [video tap];
     [self waitForPlaybackSecondsFrom:1 to:50];
     [self assertVideoFramesAdvance:@"explorer-icon-playback"];
     [self closePlayback];
+    NSString *spoken = [self visibleButton:@"重复名称.mkv"].value;
+    // Either result is selectable; at least the played tile retains spoken progress.
+    BOOL hasProgress = NO;
+    for (XCUIElement *hit in hits.allElementsBoundByIndex) if ([(NSString *)hit.value containsString:@"上次"]) hasProgress = YES;
+    XCTAssertTrue(hasProgress, @"%@", spoken);
 }
 - (void)testCompactLandscapeControlsAndRotation {
     [self openTransportStream];

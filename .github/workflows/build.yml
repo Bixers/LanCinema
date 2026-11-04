@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       views_only:
-        description: 'Validate browser navigation on unchanged production code; no new IPA build'
+        description: 'Validate browser navigation, accessibility and native appearances'
         type: boolean
         default: false
       browser:
@@ -24,7 +24,6 @@ permissions:
   contents: read
 jobs:
   build:
-    if: ${{ !inputs.views_only }}
     runs-on: macos-26
     timeout-minutes: 35
     steps:
@@ -152,6 +151,7 @@ jobs:
           TEST_SELECTION=()
           if [ '${{ inputs.views_only }}' = 'true' ]; then
             TEST_SELECTION=(
+              '-only-testing:LanCinemaUITests/PlaybackTests/testExplorerAppearanceCaptures'
               '-only-testing:LanCinemaUITests/PlaybackTests/testExplorerViewsNavigationAndPersistence'
             )
           elif [ '${{ inputs.unit_only }}' = 'true' ]; then
