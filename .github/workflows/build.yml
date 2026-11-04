@@ -8,6 +8,7 @@ on:
         options:
           - macos-26
           - macos-26-intel
+          - macos-15-intel
         default: macos-26
       views_only:
         description: 'Validate browser navigation, accessibility and native appearances'
@@ -37,7 +38,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install build tools
         run: |
-          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_${{ startsWith(inputs.runner, 'macos-15') && '26.3' || '26.6' }}.app/Contents/Developer
           brew install xcodegen
           if ! command -v pod >/dev/null; then gem install cocoapods --no-document; fi
           xcodebuild -version
@@ -83,7 +84,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install build tools
         run: |
-          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_${{ startsWith(inputs.runner, 'macos-15') && '26.3' || '26.6' }}.app/Contents/Developer
           brew install xcodegen
           if ! command -v pod >/dev/null; then gem install cocoapods --no-document; fi
           xcodegen generate
