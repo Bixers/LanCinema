@@ -94,7 +94,7 @@ jobs:
           python3 -m pip install --break-system-packages imageio-ffmpeg
           cd server && python3 -m unittest -v test_server.py test_multi_root.py test_video_probe.py test_playback_cache.py test_thumbnails.py
       - name: Boot simulator
-        timeout-minutes: 9
+        timeout-minutes: 15
         run: |
           python3 - <<'PY'
           import json, os, subprocess
@@ -112,7 +112,16 @@ jobs:
           device = pairs[0][1]['udid']
           print('Selected runtime:', pairs[0][0], flush=True)
           subprocess.run(['xcrun', 'simctl', 'boot', device], check=True, timeout=45)
-          subprocess.run(['xcrun', 'simctl', 'bootstatus', device, '-b'], check=True, timeout=240)
+          for attempt in range(2):
+              try:
+                  subprocess.run(['xcrun', 'simctl', 'bootstatus', device, '-b'], check=True, timeout=240)
+                  break
+              except subprocess.TimeoutExpired:
+                  # A cold hosted Intel simulator can finish booting just as the
+                  # first wait expires. Recheck readiness without restarting it.
+                  if attempt == 1:
+                      raise
+                  print('Simulator first boot is slow; waiting once more for readiness', flush=True)
           # simctl boot success alone does not mean Xcode has discovered the device.
           for attempt in range(3):
               try:
