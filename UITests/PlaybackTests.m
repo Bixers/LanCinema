@@ -14,6 +14,13 @@
     [self.app launch];
 }
 - (void)tearDown {
+    if (self.testRun.failureCount) {
+        [self capture:@"failure-screen"];
+        XCTAttachment *tree = [XCTAttachment attachmentWithString:self.app.debugDescription];
+        tree.name = @"failure-accessibility-tree";
+        tree.lifetime = XCTAttachmentLifetimeKeepAlways;
+        [self addAttachment:tree];
+    }
     // A failed landscape assertion must not rotate later portrait-only checks.
     XCUIDevice.sharedDevice.orientation = UIDeviceOrientationPortrait;
     [super tearDown];
@@ -80,7 +87,16 @@
 - (void)testDiagnosticsAndHistoryAccessibleAppearance {
     XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
     [self.app.staticTexts[@"演示文件夹"] tap];
-    [self.app.staticTexts[@"测试视频.mkv"] tap];
+    XCUIElement *movie = [self.app.cells containingType:XCUIElementTypeStaticText identifier:@"测试视频.mkv"].firstMatch;
+    XCTAssertTrue([movie waitForExistenceWithTimeout:10]);
+    // Keep the row clear of iOS 26's floating search and toolbar before tapping.
+    for (NSInteger i = 0; i < 5 && CGRectGetMaxY(movie.frame) > self.app.frame.size.height - 180; i++) {
+        [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.65)] pressForDuration:.05
+            thenDragToCoordinate:[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.4)]];
+    }
+    [self capture:@"diagnostics-movie-selection"];
+    [movie tap];
+    XCTAssertTrue([self.app.otherElements[@"playerGestureSurface"] waitForExistenceWithTimeout:10]);
     [self waitForPlaybackSecondsFrom:3 to:30];
     [self.app.buttons[@"暂停"] tap];
     [self.app.buttons[@"播放诊断"] tap];
