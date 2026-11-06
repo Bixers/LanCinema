@@ -77,7 +77,7 @@ NSString *LCProgressKey(NSString *host, NSString *library, NSString *path) {
     metadata[@"video"] = @YES;
     NSMutableArray *records = [[self allRecords] mutableCopy];
     NSIndexSet *matches = [records indexesOfObjectsPassingTest:^BOOL(NSDictionary *r, NSUInteger i, BOOL *stop) {
-        return [self record:r matchesHost:host library:library] && [r[@"item"][@"path"] isEqual:item[@"path"];
+        return [self record:r matchesHost:host library:library] && [r[@"item"][@"path"] isEqual:item[@"path"]];
     }];
     [records removeObjectsAtIndexes:matches];
     [records insertObject:@{@"host":host ?: @"", @"library":library ?: @"", @"item":metadata,
