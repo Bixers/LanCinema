@@ -67,6 +67,7 @@
     [self closePlayback];
     [self.app.buttons[@"continueWatching"] tap];
     XCTAssertTrue([self.app.staticTexts[@"时间戳偏移测试.ts"] waitForExistenceWithTimeout:10]);
+    XCTAssertTrue(self.app.buttons[@"编辑"].exists);
     [self capture:@"history-portrait"];
     XCUIDevice.sharedDevice.orientation = UIDeviceOrientationLandscapeLeft;
     [self capture:@"history-landscape"];

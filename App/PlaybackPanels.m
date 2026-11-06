@@ -17,9 +17,10 @@ static NSString *HistoryTime(double seconds) {
     [super viewDidLoad]; self.title = @"继续观看";
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 120;
+    self.tableView.sectionFooterHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedSectionFooterHeight = 64;
     self.tableView.accessibilityIdentifier = @"continueWatchingList";
-    self.navigationItem.rightBarButtonItem = self.editButtonItem;
-    self.editButtonItem.title = @"编辑";
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"编辑" style:UIBarButtonItemStylePlain target:self action:@selector(toggleEditing)];
     self.empty = [UILabel new]; self.empty.numberOfLines = 0;
     self.empty.textAlignment = NSTextAlignmentCenter;
     self.empty.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
@@ -36,8 +37,9 @@ static NSString *HistoryTime(double seconds) {
 }
 - (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self.navigationController setToolbarHidden:YES animated:animated]; [self reloadHistory]; }
 - (void)setEditing:(BOOL)editing animated:(BOOL)animated {
-    [super setEditing:editing animated:animated]; self.editButtonItem.title = editing ? @"完成" : @"编辑";
+    [super setEditing:editing animated:animated]; self.navigationItem.rightBarButtonItem.title = editing ? @"完成" : @"编辑";
 }
+- (void)toggleEditing { [self setEditing:!self.editing animated:YES]; }
 - (NSString *)tableView:(UITableView *)tableView titleForDeleteConfirmationButtonForRowAtIndexPath:(NSIndexPath *)indexPath { return @"移除记录"; }
 - (void)reloadHistory {
     self.records = [LCPlaybackHistory.shared recordsForHost:self.host library:self.library];
@@ -48,6 +50,14 @@ static NSString *HistoryTime(double seconds) {
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.records.count; }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     return self.records.count ? @"按最近观看排序 · 仅此电脑和共享目录\n左滑移除记录，不会删除视频。" : nil;
+}
+- (void)tableView:(UITableView *)tableView willDisplayFooterView:(UIView *)view forSection:(NSInteger)section {
+    if ([view isKindOfClass:UITableViewHeaderFooterView.class]) {
+        UILabel *label = ((UITableViewHeaderFooterView *)view).textLabel;
+        label.numberOfLines = 0;
+        label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+        label.adjustsFontForContentSizeCategory = YES;
+    }
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"history"];
