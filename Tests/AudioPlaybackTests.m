@@ -4,6 +4,8 @@
 #import <MobileVLCKit/MobileVLCKit.h>
 #import "../App/Connection.h"
 #import "../App/AudioOutput.h"
+#import "../App/PlaybackHistory.h"
+#import "../App/PlaybackHealth.h"
 
 @interface PlayerController : UIViewController
 @property(nonatomic, copy) NSDictionary *item;
@@ -17,6 +19,8 @@
 - (void)audioInterrupted:(NSNotification *)note;
 - (double)duration;
 - (BOOL)canSeek;
+- (void)restartPlaybackAt:(double)seconds;
+- (void)saveProgress;
 @end
 
 @interface AudioPlaybackTests : XCTestCase
@@ -69,6 +73,7 @@
 - (PlayerController *)openAt:(double)position {
     PlayerController *controller = [PlayerController new];
     controller.item = @{@"path": @"演示文件夹/时间戳偏移测试.ts", @"name": @"Audio regression.ts"};
+    [LCPlaybackHistory.shared removePath:controller.item[@"path"] host:@"127.0.0.1" library:[NSUserDefaults.standardUserDefaults stringForKey:@"libraryID"]];
     [NSUserDefaults.standardUserDefaults setDouble:position forKey:controller.progressKey];
     controller.modalPresentationStyle = UIModalPresentationFullScreen;
     [self.window.rootViewController presentViewController:controller animated:NO completion:nil];
@@ -155,6 +160,37 @@
     NSLog(@"REPLAY_SUBTITLE tracks=%@ selected=%d", player.player.videoSubTitlesNames, player.player.currentVideoSubTitleIndex);
     XCTAssertGreaterThanOrEqual(player.player.currentVideoSubTitleIndex, 0);
     [self close:player];
+}
+- (void)testRapidSeeksAndUnconfirmedPositionNeverSaved {
+    PlayerController *p = [self openAt:0]; [self advanceRunLoop:3];
+    [p.audioOutput beginRenderProbe];
+    [p seekToTime:42]; [p seekToTime:8]; [p seekToTime:28];
+    [self checkSound:p label:@"rapid-latest-seek"];
+    XCTAssertEqualWithAccuracy(p.player.time.intValue/1000.0, 30, 1.5);
+    [p saveProgress];
+    double confirmed = [NSUserDefaults.standardUserDefaults doubleForKey:p.progressKey];
+    XCTAssertGreaterThan(confirmed, 27);
+    [p togglePlay]; [self advanceRunLoop:.3];
+    [p seekToTime:50]; [p saveProgress];
+    XCTAssertEqualWithAccuracy([NSUserDefaults.standardUserDefaults doubleForKey:p.progressKey], confirmed, .5);
+    [self advanceRunLoop:1];
+    XCTAssertFalse(p.player.isPlaying);
+    [p togglePlay]; [self advanceRunLoop:1];
+    XCTAssertEqualWithAccuracy(p.player.time.intValue/1000.0, 51, 1.5);
+    [self close:p];
+}
+- (void)testInputRecoveryPreservesPauseAndSpeed {
+    PlayerController *p = [self openAt:0]; [self advanceRunLoop:3];
+    [p setValue:@2 forKey:@"selectedRate"]; [p applyPlaybackRate];
+    [p restartPlaybackAt:20]; [self advanceRunLoop:2];
+    XCTAssertTrue(p.player.isPlaying);
+    XCTAssertEqualWithAccuracy(p.player.rate, 2, .01);
+    XCTAssertEqualWithAccuracy(p.player.time.intValue/1000.0, 24, 2);
+    [p togglePlay]; [self advanceRunLoop:.3];
+    [p restartPlaybackAt:12]; [self advanceRunLoop:2];
+    XCTAssertFalse(p.player.isPlaying, @"Manual recovery must preserve a user pause");
+    XCTAssertEqualWithAccuracy(p.player.time.intValue/1000.0, 12, 2);
+    [self close:p];
 }
 - (void)tearDown {
     UIViewController *presented = self.window.rootViewController.presentedViewController;

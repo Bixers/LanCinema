@@ -10,6 +10,10 @@ on:
           - macos-26-intel
           - macos-15-intel
         default: macos-26
+      playback:
+        description: 'Validate seek recovery, diagnostics, continue watching and audio'
+        type: boolean
+        default: false
       views_only:
         description: 'Validate browser navigation, accessibility and native appearances'
         type: boolean
@@ -166,7 +170,18 @@ jobs:
           PY
           set -o pipefail
           TEST_SELECTION=()
-          if [ '${{ inputs.views_only }}' = 'true' ]; then
+          if [ '${{ inputs.playback }}' = 'true' ]; then
+            TEST_SELECTION=(
+              '-only-testing:LanCinemaUITests/PlaybackTests/testContinueWatchingPersistenceAndCompletion'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testDiagnosticsAndHistoryAccessibleAppearance'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testTransportStreamDurationSeekingAndResume'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testSeekAndReplayAfterVideoEnds'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testHorizontalCanvasSeekingWithoutGestureConflicts'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testControlsAutoHideAndTapToggle'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testCompactLandscapeControlsAndRotation'
+              '-only-testing:LanCinemaTests'
+            )
+          elif [ '${{ inputs.views_only }}' = 'true' ]; then
             TEST_SELECTION=(
               '-only-testing:LanCinemaUITests/PlaybackTests/testExplorerAppearanceCaptures'
               '-only-testing:LanCinemaUITests/PlaybackTests/testExplorerViewsNavigationAndPersistence'

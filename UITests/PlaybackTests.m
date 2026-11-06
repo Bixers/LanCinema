@@ -44,6 +44,67 @@
     if (self.app.buttons[@"暂停"].isHittable) [self.app.buttons[@"暂停"] tap];
     [self.app.buttons[@"关闭播放器"] tap];
 }
+- (void)testContinueWatchingPersistenceAndCompletion {
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    [self.app.buttons[@"continueWatching"] tap];
+    XCTAssertTrue([self.app.staticTexts containingPredicate:[NSPredicate predicateWithFormat:@"label CONTAINS %@", @"还没有未看完"]].firstMatch.exists);
+    [self capture:@"history-empty"];
+    [[self.app.navigationBars.buttons elementBoundByIndex:0] tap];
+    [self.app.staticTexts[@"演示文件夹"] tap];
+    [self.app.staticTexts[@"时间戳偏移测试.ts"] tap];
+    [self waitForPlaybackSecondsFrom:1 to:20];
+    [self.app.sliders[@"播放进度"] adjustToNormalizedSliderPosition:.3];
+    [self waitForPlaybackSecondsFrom:16 to:26];
+    [self assertVideoFramesAdvance:@"history-confirmed-frames"];
+    [self closePlayback];
+    [self.app.buttons[@"continueWatching"] tap];
+    XCTAssertTrue([self.app.staticTexts[@"时间戳偏移测试.ts"] waitForExistenceWithTimeout:10]);
+    [self capture:@"history-portrait"];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationLandscapeLeft;
+    [self capture:@"history-landscape"];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationPortrait;
+    [self.app terminate]; self.app.launchArguments = @[@"--ui-test-keep-controls"]; [self.app launch];
+    XCTAssertTrue([self.app.buttons[@"continueWatching"] waitForExistenceWithTimeout:20]);
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    [self.app.buttons[@"continueWatching"] tap];
+    [self.app.staticTexts[@"时间戳偏移测试.ts"] tap];
+    [self waitForPlaybackSecondsFrom:16 to:40];
+    [self assertVideoFramesAdvance:@"history-resumed-frames"];
+    [self.app.sliders[@"播放进度"] adjustToNormalizedSliderPosition:.98];
+    XCTAssertTrue([self.app.buttons[@"重新播放"] waitForExistenceWithTimeout:15]);
+    [self closePlayback];
+    XCTAssertFalse(self.app.staticTexts[@"时间戳偏移测试.ts"].exists);
+    [self capture:@"history-completed-removed"];
+}
+- (void)testDiagnosticsAndHistoryAccessibleAppearance {
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    [self.app.staticTexts[@"演示文件夹"] tap];
+    [self.app.staticTexts[@"测试视频.mkv"] tap];
+    [self waitForPlaybackSecondsFrom:3 to:30];
+    [self.app.buttons[@"暂停"] tap];
+    [self.app.buttons[@"播放诊断"] tap];
+    XCTAssertTrue([self.app.textViews[@"diagnosticReport"] waitForExistenceWithTimeout:5]);
+    [self.app.buttons[@"检查连接"] tap];
+    NSPredicate *checked = [NSPredicate predicateWithFormat:@"value CONTAINS %@", @"HTTP 206"];
+    [self expectationForPredicate:checked evaluatedWithObject:self.app.textViews[@"diagnosticReport"] handler:nil];
+    [self waitForExpectationsWithTimeout:12 handler:nil];
+    [self capture:@"diagnostics-portrait"];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationLandscapeLeft;
+    [self capture:@"diagnostics-landscape"];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationPortrait;
+    [self.app.buttons[@"重新打开视频"] tap];
+    XCTAssertTrue([self.app.buttons[@"播放"] waitForExistenceWithTimeout:12]);
+    [self closePlayback];
+    [self.app terminate]; self.app.launchArguments = @[@"--ui-test-dark", @"--ui-test-large", @"--ui-test-keep-controls"]; [self.app launch];
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    [self.app.buttons[@"continueWatching"] tap];
+    XCTAssertTrue([self.app.staticTexts[@"测试视频.mkv"] waitForExistenceWithTimeout:5]);
+    [self capture:@"history-dark-large"];
+    [[self.app.cells elementBoundByIndex:0] swipeLeft];
+    [self.app.buttons[@"移除记录"] tap];
+    XCTAssertFalse(self.app.staticTexts[@"测试视频.mkv"].exists);
+    [self capture:@"history-dark-empty"];
+}
 - (void)testChineseExternalSubtitleRendering {
     XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
     [self.app.staticTexts[@"演示文件夹"] tap];
