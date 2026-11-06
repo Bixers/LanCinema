@@ -817,7 +817,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     panel.retry = ^{
         PlayerController *s = owner; if (!s || s.closed) return;
         [s.seekHealth cancel]; s.seekHealth = [LCPlaybackHealth new];
-        if ([s isTransportStream] && !s.prepared) [s prepareTransportStream];
+        if ([s isTransportStream] && !s.prepared) { if (!s.preparing) [s prepareTransportStream]; }
         else [s restartPlaybackAt:s.lastPlayableTime];
     };
     [self presentViewController:[[UINavigationController alloc] initWithRootViewController:panel] animated:YES completion:nil];
@@ -859,6 +859,9 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     double duration = [self duration];
     NSInteger displayed = self.player.media.statistics.displayedPictures;
     double actualTime = MAX(0, self.player.time.intValue / 1000.0);
+    // A paused reopen needs one decoded picture, not a running playback clock.
+    // Stop at the first picture even if VLC has not published the target time.
+    if (self.restoreTracksOnPlay && !self.wantsPlayback && displayed > 0 && self.player.isPlaying) [self.player pause];
     [self checkPlaybackHealthWithTime:actualTime frames:displayed];
     if (!self.waitingForSeekFrames && !self.recoveryFailed && displayed > self.lastDisplayedFrames) self.lastPlayableTime = actualTime;
     self.lastDisplayedFrames = displayed;

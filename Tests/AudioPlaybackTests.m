@@ -21,6 +21,7 @@
 - (BOOL)canSeek;
 - (void)restartPlaybackAt:(double)seconds;
 - (void)saveProgress;
+- (double)currentPlaybackTime;
 @end
 
 @interface AudioPlaybackTests : XCTestCase
@@ -190,7 +191,10 @@
     [p togglePlay]; [self advanceRunLoop:.3];
     [p restartPlaybackAt:12]; [self advanceRunLoop:2];
     XCTAssertFalse(p.player.isPlaying, @"Manual recovery must preserve a user pause");
-    XCTAssertEqualWithAccuracy(p.player.time.intValue/1000.0, 12, 2);
+    XCTAssertGreaterThan(p.player.media.statistics.displayedPictures, 0);
+    XCTAssertEqualWithAccuracy([p currentPlaybackTime], 12, 2);
+    [p togglePlay]; [self advanceRunLoop:1];
+    XCTAssertEqualWithAccuracy(p.player.time.intValue/1000.0, 14, 2);
     [self close:p];
 }
 - (void)tearDown {

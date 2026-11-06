@@ -10,6 +10,7 @@ static NSString *HistoryTime(double seconds) {
 @property(nonatomic, copy) NSArray *records;
 @property(nonatomic, strong) NSURLSessionDataTask *task;
 @property(nonatomic, strong) UILabel *empty;
+@property(nonatomic) NSInteger requestGeneration;
 @end
 @implementation LCHistoryController
 - (void)viewDidLoad {
@@ -69,6 +70,7 @@ static NSString *HistoryTime(double seconds) {
 }
 - (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)style forRowAtIndexPath:(NSIndexPath *)indexPath {
     if (style != UITableViewCellEditingStyleDelete) return;
+    ++self.requestGeneration;
     [self.task cancel]; self.task = nil; self.title = @"继续观看";
     [LCPlaybackHistory.shared removePath:self.records[indexPath.row][@"item"][@"path"] host:self.host library:self.library];
     [self reloadHistory];
@@ -76,6 +78,7 @@ static NSString *HistoryTime(double seconds) {
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (self.task) return;
+    NSInteger generation = ++self.requestGeneration;
     NSDictionary *saved = self.records[indexPath.row][@"item"];
     self.title = @"正在检查文件…";
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:self.urlForEndpoint(@"/api/list", [saved[@"path"] stringByDeletingLastPathComponent])];
@@ -84,7 +87,7 @@ static NSString *HistoryTime(double seconds) {
     self.task = [NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         NSDictionary *json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
         dispatch_async(dispatch_get_main_queue(), ^{
-            LCHistoryController *s = owner; if (!s || !s.task || error.code == NSURLErrorCancelled) return;
+            LCHistoryController *s = owner; if (!s || generation != s.requestGeneration || !s.task || error.code == NSURLErrorCancelled) return;
             s.task = nil; s.title = @"继续观看";
             NSInteger status = [(NSHTTPURLResponse *)response statusCode];
             NSDictionary *found = nil;
@@ -105,7 +108,7 @@ static NSString *HistoryTime(double seconds) {
 }
 - (void)viewDidDisappear:(BOOL)animated {
     [super viewDidDisappear:animated];
-    if (self.isMovingFromParentViewController) { [self.task cancel]; self.task = nil; }
+    if (self.isMovingFromParentViewController) { ++self.requestGeneration; [self.task cancel]; self.task = nil; }
 }
 - (void)dealloc { [self.task cancel]; }
 @end
