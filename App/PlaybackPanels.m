@@ -25,7 +25,7 @@ static NSString *HistoryTime(double seconds) {
     self.empty.textAlignment = NSTextAlignmentCenter;
     self.empty.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
     self.empty.adjustsFontForContentSizeCategory = YES;
-    self.empty.textColor = UIColor.secondaryLabelColor;
+    self.empty.textColor = UIColor.labelColor;
     self.empty.text = @"还没有未看完的视频\n\n播放后会自动记住位置\n返回文件库选择一个视频";
     self.empty.translatesAutoresizingMaskIntoConstraints = NO;
     UIView *background = [UIView new]; [background addSubview:self.empty];
@@ -48,16 +48,18 @@ static NSString *HistoryTime(double seconds) {
     [self.tableView reloadData];
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.records.count; }
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    return self.records.count ? @"按最近观看排序 · 仅此电脑和共享目录\n左滑移除记录，不会删除视频。" : nil;
-}
-- (void)tableView:(UITableView *)tableView willDisplayFooterView:(UIView *)view forSection:(NSInteger)section {
-    if ([view isKindOfClass:UITableViewHeaderFooterView.class]) {
-        UILabel *label = ((UITableViewHeaderFooterView *)view).textLabel;
-        label.numberOfLines = 0;
-        label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
-        label.adjustsFontForContentSizeCategory = YES;
-    }
+- (UIView *)tableView:(UITableView *)tableView viewForFooterInSection:(NSInteger)section {
+    if (!self.records.count) return nil;
+    UITableViewHeaderFooterView *footer = [[UITableViewHeaderFooterView alloc] initWithReuseIdentifier:nil];
+    // Configure wrapping before UIKit measures the footer, not after display.
+    UIListContentConfiguration *content = [UIListContentConfiguration plainFooterConfiguration];
+    content.text = @"按最近观看排序 · 仅此电脑和共享目录\n左滑移除记录，不会删除视频。";
+    content.textProperties.numberOfLines = 0;
+    content.textProperties.lineBreakMode = NSLineBreakByWordWrapping;
+    content.textProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+    content.textProperties.color = UIColor.labelColor;
+    footer.contentConfiguration = content;
+    return footer;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"history"];

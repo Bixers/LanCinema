@@ -118,6 +118,9 @@
     [self.app.buttons[@"continueWatching"] tap];
     XCTAssertTrue([self.app.staticTexts[@"测试视频.mkv"] waitForExistenceWithTimeout:5]);
     [self capture:@"history-dark-large"];
+    [self.app.tables.firstMatch swipeUp];
+    [self capture:@"history-dark-footer"];
+    [self.app.tables.firstMatch swipeDown];
     [[self.app.cells elementBoundByIndex:0] swipeLeft];
     [self.app.buttons[@"移除记录"] tap];
     XCTAssertFalse(self.app.staticTexts[@"测试视频.mkv"].exists);
