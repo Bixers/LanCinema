@@ -97,6 +97,13 @@ jobs:
         run: |
           python3 -m pip install --break-system-packages imageio-ffmpeg
           cd server && python3 -m unittest -v test_server.py test_multi_root.py test_video_probe.py test_playback_cache.py test_thumbnails.py
+      - name: Compile simulator tests
+        run: |
+          set -o pipefail
+          xcodebuild -workspace LanCinema.xcworkspace -scheme LanCinema \
+            -configuration Debug -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build-tests CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- \
+            build-for-testing | tee ui-test-build.log
       - name: Boot simulator
         timeout-minutes: 15
         run: |
@@ -217,7 +224,7 @@ jobs:
             )
           fi
           xcodebuild -workspace LanCinema.xcworkspace -scheme LanCinema "${TEST_SELECTION[@]}" \
-            -configuration Debug -destination "platform=iOS Simulator,id=$LC_SIMULATOR_ID" -destination-timeout 120 \
+            -configuration Debug -derivedDataPath build-tests -destination "platform=iOS Simulator,id=$LC_SIMULATOR_ID" -destination-timeout 120 \
             -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
             -maximum-test-execution-time-allowance 180 \
             -parallel-testing-enabled NO -resultBundlePath UITestResults.xcresult CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- test | tee ui-test.log
@@ -252,3 +259,4 @@ jobs:
             screenshots/manifest.json
             screenshots/test-summary.json
             ui-test.log
+            ui-test-build.log
