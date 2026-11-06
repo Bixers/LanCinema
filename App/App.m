@@ -688,7 +688,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 - (void)togglePlay {
     [self endBoost];
     self.controlsTouched = NSDate.timeIntervalSinceReferenceDate;
-    if (self.audioInterruptionActive) { self.resumeAfterInterruption = !self.resumeAfterInterruption; return; }
+    if (self.audioInterruptionActive) { self.resumeAfterInterruption = !self.resumeAfterInterruption; self.wantsPlayback = self.resumeAfterInterruption; return; }
     self.resumeAfterInterruption = NO;
     if ([self isTransportStream] && !self.prepared) {
         if (!self.preparing) [self prepareTransportStream];
@@ -1043,6 +1043,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         BOOL resume = self.resumeAfterInterruption && ([note.userInfo[AVAudioSessionInterruptionOptionKey] unsignedIntegerValue] & AVAudioSessionInterruptionOptionShouldResume);
         self.audioInterruptionActive = NO;
         self.resumeAfterInterruption = NO;
+        self.wantsPlayback = resume;
         if (resume) {
             if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive) {
                 [AVAudioSession.sharedInstance setActive:YES error:nil];

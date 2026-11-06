@@ -133,6 +133,7 @@
     [player audioInterrupted:began]; [player audioInterrupted:ended];
     [self advanceRunLoop:.3];
     XCTAssertFalse(player.player.isPlaying, @"An interruption must not undo the user's pause");
+    XCTAssertFalse([[player valueForKey:@"wantsPlayback"] boolValue], @"The recovery watchdog must preserve the pause too");
     [self close:player];
     PlayerController *resumed = [self openAt:23];
     double resume = [self checkSound:resumed label:@"resume"];
