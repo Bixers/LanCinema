@@ -48,7 +48,7 @@
     XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
     [self.app.buttons[@"continueWatching"] tap];
     NSPredicate *emptyHistory = [NSPredicate predicateWithFormat:@"label CONTAINS %@", @"还没有未看完"];
-    XCTAssertTrue([self.app.staticTexts containingPredicate:emptyHistory].firstMatch.exists);
+    XCTAssertTrue([self.app.staticTexts matchingPredicate:emptyHistory].firstMatch.exists);
     [self capture:@"history-empty"];
     [[self.app.navigationBars.buttons elementBoundByIndex:0] tap];
     [self.app.staticTexts[@"演示文件夹"] tap];
