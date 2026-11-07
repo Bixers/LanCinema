@@ -1,5 +1,6 @@
 #import "Favorites.h"
 #import "FilePresentation.h"
+#import <math.h>
 
 static NSString *const FavoritesKey = @"favoritesV1";
 @interface LCFavorites ()
@@ -143,11 +144,14 @@ static NSString *const FavoritesKey = @"favoritesV1";
     // Section footers pin over rows in plain tables. This footer stays after all
     // records and is remeasured for rotation and Dynamic Type instead.
     CGFloat width = self.tableView.bounds.size.width;
-    self.footnote.frame = CGRectMake(0, 0, width, self.footnote.frame.size.height);
+    CGRect frame = self.footnote.frame;
+    frame.size.width = width;
+    self.footnote.frame = frame;
     CGSize size = [self.footnote systemLayoutSizeFittingSize:CGSizeMake(width, UILayoutFittingCompressedSize.height)
         withHorizontalFittingPriority:UILayoutPriorityRequired verticalFittingPriority:UILayoutPriorityFittingSizeLevel];
     if (fabs(self.footnote.frame.size.height - size.height) > .5) {
-        self.footnote.frame = CGRectMake(0, 0, width, size.height);
+        frame.size.height = size.height;
+        self.footnote.frame = frame;
         self.tableView.tableFooterView = self.footnote;
     }
 }
