@@ -168,8 +168,11 @@
     XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
     [self.app.buttons[@"favorites"] tap];
     XCTAssertTrue([self.app.staticTexts[longFolder] waitForExistenceWithTimeout:5]);
+    XCTAssertFalse(self.app.staticTexts[@"favoritesFootnote"].isHittable, @"Instructions must stay after the long row, not pin over it");
     [self capture:@"favorites-dark-large"];
-    [self.app.tables.firstMatch swipeUp]; [self capture:@"favorites-dark-footer"];
+    for (NSInteger i = 0; i < 5 && !self.app.staticTexts[@"favoritesFootnote"].isHittable; i++) [self.app.tables.firstMatch swipeUp];
+    XCTAssertTrue(self.app.staticTexts[@"favoritesFootnote"].isHittable);
+    [self capture:@"favorites-dark-footer"];
     XCUIDevice.sharedDevice.orientation = UIDeviceOrientationLandscapeLeft;
     [self.app.tables.firstMatch swipeDown]; [self capture:@"favorites-dark-landscape"];
     XCUIDevice.sharedDevice.orientation = UIDeviceOrientationPortrait;

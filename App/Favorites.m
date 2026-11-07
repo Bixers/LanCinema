@@ -70,6 +70,7 @@ static NSString *const FavoritesKey = @"favoritesV1";
 @interface LCFavoritesController ()
 @property(nonatomic, copy) NSArray<NSDictionary *> *records;
 @property(nonatomic, strong) UILabel *empty;
+@property(nonatomic, strong) UIView *footnote;
 @property(nonatomic, strong) NSURLSessionDataTask *task;
 @property(nonatomic) NSInteger generation;
 @end
@@ -79,8 +80,22 @@ static NSString *const FavoritesKey = @"favoritesV1";
     self.tableView.accessibilityIdentifier = @"favoritesList";
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 110;
-    self.tableView.sectionFooterHeight = UITableViewAutomaticDimension;
-    self.tableView.estimatedSectionFooterHeight = 70;
+    self.footnote = [UIView new];
+    self.footnote.layoutMargins = UIEdgeInsetsMake(12, 16, 16, 16);
+    UILabel *instructions = [UILabel new];
+    instructions.text = @"最近收藏在前 · 仅此电脑和共享目录\n左滑取消收藏，不会删除原文件。";
+    instructions.accessibilityIdentifier = @"favoritesFootnote";
+    instructions.numberOfLines = 0;
+    instructions.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+    instructions.adjustsFontForContentSizeCategory = YES;
+    instructions.textColor = UIColor.labelColor;
+    instructions.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.footnote addSubview:instructions];
+    [NSLayoutConstraint activateConstraints:@[
+        [instructions.leadingAnchor constraintEqualToAnchor:self.footnote.layoutMarginsGuide.leadingAnchor],
+        [instructions.trailingAnchor constraintEqualToAnchor:self.footnote.layoutMarginsGuide.trailingAnchor],
+        [instructions.topAnchor constraintEqualToAnchor:self.footnote.layoutMarginsGuide.topAnchor],
+        [instructions.bottomAnchor constraintEqualToAnchor:self.footnote.layoutMarginsGuide.bottomAnchor]]];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"编辑" style:UIBarButtonItemStylePlain target:self action:@selector(toggleEditing)];
     self.empty = [UILabel new]; self.empty.numberOfLines = 0;
     self.empty.text = @"还没有收藏\n\n在文件库中长按视频或文件夹\n选择「加入收藏」，下次更快找到";
@@ -112,7 +127,9 @@ static NSString *const FavoritesKey = @"favoritesV1";
     self.tableView.backgroundView.hidden = self.records.count > 0;
     self.navigationItem.rightBarButtonItem.enabled = self.records.count > 0;
     if (!self.records.count) [self setEditing:NO animated:NO];
+    self.tableView.tableFooterView = self.records.count ? self.footnote : nil;
     [self.tableView reloadData];
+    [self.view setNeedsLayout];
 }
 - (void)setEditing:(BOOL)editing animated:(BOOL)animated {
     [super setEditing:editing animated:animated];
@@ -120,16 +137,19 @@ static NSString *const FavoritesKey = @"favoritesV1";
 }
 - (void)toggleEditing { [self setEditing:!self.editing animated:YES]; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.records.count; }
-- (UIView *)tableView:(UITableView *)tableView viewForFooterInSection:(NSInteger)section {
-    if (!self.records.count) return nil;
-    UITableViewHeaderFooterView *footer = [[UITableViewHeaderFooterView alloc] initWithReuseIdentifier:nil];
-    UIListContentConfiguration *content = [UIListContentConfiguration plainFooterConfiguration];
-    content.text = @"最近收藏在前 · 仅此电脑和共享目录\n左滑取消收藏，不会删除原文件。";
-    content.textProperties.numberOfLines = 0;
-    content.textProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
-    content.textProperties.color = UIColor.labelColor;
-    footer.contentConfiguration = content;
-    return footer;
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    if (!self.tableView.tableFooterView) return;
+    // Section footers pin over rows in plain tables. This footer stays after all
+    // records and is remeasured for rotation and Dynamic Type instead.
+    CGFloat width = self.tableView.bounds.size.width;
+    self.footnote.frame = CGRectMake(0, 0, width, self.footnote.frame.size.height);
+    CGSize size = [self.footnote systemLayoutSizeFittingSize:CGSizeMake(width, UILayoutFittingCompressedSize.height)
+        withHorizontalFittingPriority:UILayoutPriorityRequired verticalFittingPriority:UILayoutPriorityFittingSizeLevel];
+    if (fabs(self.footnote.frame.size.height - size.height) > .5) {
+        self.footnote.frame = CGRectMake(0, 0, width, size.height);
+        self.tableView.tableFooterView = self.footnote;
+    }
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"favorite"];
