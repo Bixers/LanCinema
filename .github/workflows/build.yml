@@ -10,6 +10,10 @@ on:
           - macos-26-intel
           - macos-15-intel
         default: macos-26
+      favorites:
+        description: 'Validate favorites, browser, history and all unit/audio tests'
+        type: boolean
+        default: false
       playback:
         description: 'Validate seek recovery, diagnostics, continue watching and audio'
         type: boolean
@@ -177,7 +181,16 @@ jobs:
           PY
           set -o pipefail
           TEST_SELECTION=()
-          if [ '${{ inputs.playback }}' = 'true' ]; then
+          if [ '${{ inputs.favorites }}' = 'true' ]; then
+            TEST_SELECTION=(
+              '-only-testing:LanCinemaUITests/PlaybackTests/testFavoritesDetailsPersistenceAndOpen'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testFavoritesIconsSearchAndRemove'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testFavoritesAccessibleAppearance'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testExplorerViewsNavigationAndPersistence'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testContinueWatchingPersistenceAndCompletion'
+              '-only-testing:LanCinemaTests'
+            )
+          elif [ '${{ inputs.playback }}' = 'true' ]; then
             TEST_SELECTION=(
               '-only-testing:LanCinemaUITests/PlaybackTests/testContinueWatchingPersistenceAndCompletion'
               '-only-testing:LanCinemaUITests/PlaybackTests/testDiagnosticsAndHistoryAccessibleAppearance'

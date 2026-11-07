@@ -8,6 +8,7 @@
 #import "FilePresentation.h"
 #import "VideoGeometry.h"
 #import "PlaybackHistory.h"
+#import "Favorites.h"
 #import "PlaybackHealth.h"
 #import "PlaybackPanels.h"
 
@@ -1139,7 +1140,9 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     self.navigationItem.rightBarButtonItems = @[connection, self.viewButton, self.sortButton];
     UIBarButtonItem *history = [[UIBarButtonItem alloc] initWithTitle:@"继续观看" style:UIBarButtonItemStylePlain target:self action:@selector(showHistory)];
     history.accessibilityIdentifier = @"continueWatching";
-    self.toolbarItems = @[[UIBarButtonItem flexibleSpaceItem], history, [UIBarButtonItem flexibleSpaceItem]];
+    UIBarButtonItem *favorites = [[UIBarButtonItem alloc] initWithTitle:@"收藏" style:UIBarButtonItemStylePlain target:self action:@selector(showFavorites)];
+    favorites.accessibilityIdentifier = @"favorites";
+    self.toolbarItems = @[[UIBarButtonItem flexibleSpaceItem], favorites, [UIBarButtonItem flexibleSpaceItem], history, [UIBarButtonItem flexibleSpaceItem]];
     [self updateViewMenu];
     [self updateSortMenu];
     UISearchController *search = [[UISearchController alloc] initWithSearchResultsController:nil];
@@ -1194,6 +1197,41 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     __weak typeof(self) owner = self;
     history.openItem = ^(NSDictionary *item) { [owner openFileItem:item]; };
     [self.navigationController pushViewController:history animated:YES];
+}
+- (void)showFavorites {
+    LCFavoritesController *favorites = [[LCFavoritesController alloc] initWithStyle:UITableViewStylePlain];
+    favorites.host = [NSUserDefaults.standardUserDefaults stringForKey:HostKey] ?: @"";
+    favorites.library = [NSUserDefaults.standardUserDefaults stringForKey:@"libraryID"] ?: @"";
+    favorites.urlForEndpoint = ^NSURL *(NSString *endpoint, NSString *path) { return ServiceURL(endpoint, path); };
+    __weak typeof(self) owner = self;
+    favorites.openItem = ^(NSDictionary *item) { [owner openFileItem:item]; };
+    [self.navigationController pushViewController:favorites animated:YES];
+}
+- (BOOL)isFavorite:(NSDictionary *)item {
+    return [LCFavorites.shared containsPath:item[@"path"] host:[NSUserDefaults.standardUserDefaults stringForKey:HostKey]
+                                   library:[NSUserDefaults.standardUserDefaults stringForKey:@"libraryID"]];
+}
+- (UIMenu *)favoriteMenu:(NSDictionary *)item {
+    if (!([item[@"directory"] boolValue] || [item[@"video"] boolValue])) return nil;
+    NSString *host = [NSUserDefaults.standardUserDefaults stringForKey:HostKey];
+    NSString *library = [NSUserDefaults.standardUserDefaults stringForKey:@"libraryID"];
+    if (!host.length || !library.length) return nil;
+    BOOL saved = [self isFavorite:item];
+    __weak typeof(self) owner = self;
+    UIAction *action = [UIAction actionWithTitle:saved ? @"取消收藏" : @"加入收藏"
+        image:[UIImage systemImageNamed:saved ? @"star.slash" : @"star"] identifier:nil handler:^(UIAction *a) {
+            if (saved) [LCFavorites.shared removePath:item[@"path"] host:host library:library];
+            else [LCFavorites.shared addItem:item host:host library:library];
+            [owner.tableView reloadData];
+            UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, saved ? @"已取消收藏" : @"已加入收藏");
+        }];
+    return [UIMenu menuWithChildren:@[action]];
+}
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point {
+    if ([self usesIcons]) return nil;
+    UIMenu *menu = [self favoriteMenu:self.visibleItems[indexPath.row]];
+    if (!menu) return nil;
+    return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil actionProvider:^UIMenu *(NSArray *suggested) { return menu; }];
 }
 - (BOOL)usesIcons { return [NSUserDefaults.standardUserDefaults boolForKey:@"fileIconView"]; }
 - (NSInteger)fileColumnCount {
@@ -1485,6 +1523,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 }
 - (NSString *)extraForItem:(NSDictionary *)item {
     NSMutableArray *lines = [NSMutableArray new];
+    if ([self isFavorite:item]) [lines addObject:@"已收藏"];
     if (![item[@"directory"] boolValue]) {
         double progress = [LCPlaybackHistory.shared positionForItem:item host:[NSUserDefaults.standardUserDefaults stringForKey:HostKey] library:[NSUserDefaults.standardUserDefaults stringForKey:@"libraryID"]];
         if (progress > 0) [lines addObject:[@"上次 " stringByAppendingString:ClockText(progress)]];
@@ -1516,6 +1555,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
                                    ServiceURL(@"/api/thumbnail", item[@"path"]), [NSUserDefaults.standardUserDefaults stringForKey:@"libraryID"] ?: @"");
         if ([self usesIcons]) {
             UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
+            button.menu = [self favoriteMenu:item];
             button.accessibilityLabel = item[@"name"];
             BOOL folder = [item[@"directory"] boolValue];
             NSString *type = [item[@"name"] pathExtension].uppercaseString;

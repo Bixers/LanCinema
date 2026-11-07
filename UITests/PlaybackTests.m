@@ -85,6 +85,98 @@
     XCTAssertFalse(self.app.staticTexts[@"时间戳偏移测试.ts"].exists);
     [self capture:@"history-completed-removed"];
 }
+- (void)favoriteElement:(XCUIElement *)element action:(NSString *)action {
+    XCTAssertTrue([element waitForExistenceWithTimeout:15]);
+    [element pressForDuration:1.1];
+    XCUIElement *command = self.app.buttons[action];
+    XCTAssertTrue([command waitForExistenceWithTimeout:5]);
+    [command tap];
+}
+- (void)testFavoritesDetailsPersistenceAndOpen {
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    [self.app.buttons[@"favorites"] tap];
+    XCTAssertTrue([self.app.staticTexts matchingPredicate:[NSPredicate predicateWithFormat:@"label CONTAINS %@", @"还没有收藏"]].firstMatch.exists);
+    [self capture:@"favorites-empty"];
+    [[self.app.navigationBars.buttons elementBoundByIndex:0] tap];
+    [self favoriteElement:self.app.staticTexts[@"演示文件夹"] action:@"加入收藏"];
+    XCTAssertTrue(self.app.staticTexts[@"已收藏"].exists);
+    [self capture:@"favorites-browser-details"];
+    [self.app.staticTexts[@"演示文件夹"] tap];
+    [self favoriteElement:self.app.staticTexts[@"时间戳偏移测试.ts"] action:@"加入收藏"];
+    [self.app.buttons[@"favorites"] tap];
+    XCTAssertEqual(self.app.tables[@"favoritesList"].cells.count, 2);
+    [self capture:@"favorites-portrait"];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationLandscapeLeft;
+    [self capture:@"favorites-landscape"];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationPortrait;
+    [self.app terminate]; self.app.launchArguments = @[@"--ui-test-keep-controls"]; [self.app launch];
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    [self.app.buttons[@"favorites"] tap];
+    XCTAssertEqual(self.app.tables[@"favoritesList"].cells.count, 2);
+    [self.app.staticTexts[@"演示文件夹"] tap];
+    XCTAssertTrue([self.app.staticTexts[@"下一层"] waitForExistenceWithTimeout:15]);
+    [[self.app.navigationBars.buttons elementBoundByIndex:0] tap];
+    XCTAssertTrue([self.app.tables[@"favoritesList"] waitForExistenceWithTimeout:5]);
+    [self.app.staticTexts[@"时间戳偏移测试.ts"] tap];
+    [self waitForPlaybackSecondsFrom:1 to:30];
+    [self assertVideoFramesAdvance:@"favorites-open-video"];
+    [self closePlayback];
+    [[self.app.cells containingType:XCUIElementTypeStaticText identifier:@"时间戳偏移测试.ts"].firstMatch swipeLeft];
+    [self.app.buttons[@"取消收藏"] tap];
+    XCTAssertEqual(self.app.tables[@"favoritesList"].cells.count, 1);
+    [self.app.buttons[@"编辑"] tap];
+    // The standard editing delete control opens the localized confirmation.
+    XCUIElement *deleteButton = self.app.cells.firstMatch.buttons.firstMatch;
+    [deleteButton tap];
+    [self.app.buttons[@"取消收藏"] tap];
+    XCTAssertEqual(self.app.tables[@"favoritesList"].cells.count, 0);
+    [[self.app.navigationBars.buttons elementBoundByIndex:0] tap];
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:15]);
+    XCTAssertFalse(self.app.staticTexts[@"已收藏"].exists);
+}
+- (void)testFavoritesIconsSearchAndRemove {
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    [[self visibleButton:@"文件视图"] tap]; [[self visibleButton:@"图标"] tap];
+    [self favoriteElement:[self visibleButton:@"演示文件夹"] action:@"加入收藏"];
+    XCTAssertTrue([[self visibleButton:@"演示文件夹"].value containsString:@"已收藏"]);
+    [self capture:@"favorites-browser-icons"];
+    [self favoriteElement:[self visibleButton:@"演示文件夹"] action:@"取消收藏"];
+    XCTAssertFalse([[self visibleButton:@"演示文件夹"].value containsString:@"已收藏"]);
+    [self.app.searchFields.firstMatch tap]; [self.app.searchFields.firstMatch typeText:@"重复名称.mkv\n"];
+    XCUIElementQuery *hits = [self.app.buttons matchingIdentifier:@"重复名称.mkv"];
+    XCTAssertTrue([hits.firstMatch waitForExistenceWithTimeout:20]);
+    XCTAssertEqual(hits.count, 2);
+    [self favoriteElement:hits.firstMatch action:@"加入收藏"];
+    NSUInteger saved = 0;
+    for (XCUIElement *hit in hits.allElementsBoundByIndex) if ([(NSString *)hit.value containsString:@"已收藏"]) saved++;
+    XCTAssertEqual(saved, 1);
+    [self capture:@"favorites-search"];
+    [self.app terminate]; self.app.launchArguments = @[]; [self.app launch];
+    XCTAssertTrue([[self visibleButton:@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    [self.app.buttons[@"favorites"] tap];
+    XCTAssertEqual(self.app.tables[@"favoritesList"].cells.count, 1);
+    XCTAssertTrue(self.app.staticTexts[@"重复名称.mkv"].exists);
+    XCTAssertTrue([self.app.staticTexts matchingPredicate:[NSPredicate predicateWithFormat:@"label CONTAINS %@", @"位置：符号+ &%# 测试/"]].firstMatch.exists);
+}
+- (void)testFavoritesAccessibleAppearance {
+    NSString *longFolder = @"这是用于检查完整换行显示的长文件夹名称包含中文和English并且不应该出现省略号这些文字都应当可见";
+    XCTAssertTrue([self.app.staticTexts[longFolder] waitForExistenceWithTimeout:20]);
+    [self favoriteElement:self.app.staticTexts[longFolder] action:@"加入收藏"];
+    [self.app terminate]; self.app.launchArguments = @[@"--ui-test-dark", @"--ui-test-large"]; [self.app launch];
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    [self.app.buttons[@"favorites"] tap];
+    XCTAssertTrue([self.app.staticTexts[longFolder] waitForExistenceWithTimeout:5]);
+    [self capture:@"favorites-dark-large"];
+    [self.app.tables.firstMatch swipeUp]; [self capture:@"favorites-dark-footer"];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationLandscapeLeft;
+    [self.app.tables.firstMatch swipeDown]; [self capture:@"favorites-dark-landscape"];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationPortrait;
+    [self.app.tables.firstMatch swipeDown];
+    [self.app.cells.firstMatch swipeLeft]; [self.app.buttons[@"取消收藏"] tap];
+    [self capture:@"favorites-dark-empty"];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationLandscapeLeft;
+    [self capture:@"favorites-dark-empty-landscape"];
+}
 - (void)testDiagnosticsAndHistoryAccessibleAppearance {
     XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
     [self.app.staticTexts[@"演示文件夹"] tap];
