@@ -95,7 +95,8 @@
 - (void)testFavoritesDetailsPersistenceAndOpen {
     XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
     [self.app.buttons[@"favorites"] tap];
-    XCTAssertTrue([self.app.staticTexts matchingPredicate:[NSPredicate predicateWithFormat:@"label CONTAINS %@", @"还没有收藏"]].firstMatch.exists);
+    NSPredicate *emptyFavorites = [NSPredicate predicateWithFormat:@"label CONTAINS %@", @"还没有收藏"];
+    XCTAssertTrue([self.app.staticTexts matchingPredicate:emptyFavorites].firstMatch.exists);
     [self capture:@"favorites-empty"];
     [[self.app.navigationBars.buttons elementBoundByIndex:0] tap];
     [self favoriteElement:self.app.staticTexts[@"演示文件夹"] action:@"加入收藏"];
@@ -156,7 +157,8 @@
     [self.app.buttons[@"favorites"] tap];
     XCTAssertEqual(self.app.tables[@"favoritesList"].cells.count, 1);
     XCTAssertTrue(self.app.staticTexts[@"重复名称.mkv"].exists);
-    XCTAssertTrue([self.app.staticTexts matchingPredicate:[NSPredicate predicateWithFormat:@"label CONTAINS %@", @"位置：符号+ &%# 测试/"]].firstMatch.exists);
+    NSPredicate *parentPath = [NSPredicate predicateWithFormat:@"label CONTAINS %@", @"位置：符号+ &%# 测试/"];
+    XCTAssertTrue([self.app.staticTexts matchingPredicate:parentPath].firstMatch.exists);
 }
 - (void)testFavoritesAccessibleAppearance {
     NSString *longFolder = @"这是用于检查完整换行显示的长文件夹名称包含中文和English并且不应该出现省略号这些文字都应当可见";
