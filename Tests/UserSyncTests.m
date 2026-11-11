@@ -46,11 +46,16 @@
     [self handshake:@"pc"];
     [self.store queueKind:@"favorite" key:@"A/movie.mkv" value:self.value host:@"pc" library:@"lib"];
     NSDictionary *sent = [self.store requestForHost:@"pc" library:@"lib"];
+    // C comparisons box as NSNumber integers; the wire protocol needs a JSON
+    // boolean even after the operation has round-tripped through defaults.
+    NSDictionary *wire = [NSJSONSerialization JSONObjectWithData:[NSJSONSerialization dataWithJSONObject:sent options:0 error:nil] options:0 error:nil];
+    XCTAssertEqual(CFGetTypeID((__bridge CFTypeRef)wire[@"operations"][0][@"deleted"]), CFBooleanGetTypeID());
     [self.store queueKind:@"favorite" key:@"A/movie.mkv" value:nil host:@"pc" library:@"lib"];
     XCTAssertTrue([self.store applyResponse:[self response:sent records:@[[self record:NO revision:@1]] revision:@1] request:sent host:@"pc" library:@"lib"]);
     NSDictionary *next = [self.store requestForHost:@"pc" library:@"lib"];
     XCTAssertEqual([next[@"operations"] count], 1);
     XCTAssertTrue([next[@"operations"][0][@"deleted"] boolValue]);
+    XCTAssertEqual(CFGetTypeID((__bridge CFTypeRef)next[@"operations"][0][@"deleted"]), CFBooleanGetTypeID());
     XCTAssertNotEqualObjects(sent[@"operations"][0][@"id"], next[@"operations"][0][@"id"]);
 }
 - (void)testRemoteTombstoneWinsOverInitialSeed {

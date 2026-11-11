@@ -60,7 +60,7 @@ static BOOL ValidValue(NSString *kind, NSString *key, id value) {
     long long seq = [state[@"sequence"] longLongValue] + 1;
     state[@"sequence"] = @(seq);
     NSMutableDictionary *op = [@{@"id":NSUUID.UUID.UUIDString, @"seq":@(seq), @"base":scope[@"revisions"][entry] ?: @0,
-                                @"kind":kind, @"key":key, @"mode":seed ? @"seed" : @"edit", @"deleted":@(value == nil)} mutableCopy];
+                                @"kind":kind, @"key":key, @"mode":seed ? @"seed" : @"edit", @"deleted":value ? @NO : @YES} mutableCopy];
     if (value) op[@"value"] = value;
     scope[@"pending"][entry] = op;
 }
