@@ -1,13 +1,16 @@
 """LanCinema for Windows. Build as a standalone executable with PyInstaller."""
 import ipaddress
 import os
+import plistlib
+import sqlite3
+import uuid
 from pathlib import Path
 import socket
 import sys
 import threading
 
-from PySide6.QtCore import Qt, QTimer, QThread, Signal, QLockFile
-from PySide6.QtGui import QIcon, QPixmap, QImage, QAction, QFont
+from PySide6.QtCore import Qt, QTimer, QThread, Signal, QLockFile, QUrl
+from PySide6.QtGui import QIcon, QPixmap, QImage, QAction, QFont, QDesktopServices
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QCheckBox, QFileDialog, QComboBox, QSystemTrayIcon,
@@ -16,6 +19,8 @@ import qrcode
 from zeroconf import Zeroconf, ServiceInfo, IPVersion
 from desktop_core import load_settings, save_settings, validate, set_autostart, config_path, connection_qr
 from server import MediaServer
+from user_state import UserState, state_path
+from legacy_backup import read_backup, save_archive, import_archive
 
 
 def addresses():
@@ -104,12 +109,38 @@ class ApplyWorker(QThread):
             self.finished_apply.emit(None, message)
 
 
+class RecordImportWorker(QThread):
+    completed = Signal(object, str)
+
+    def __init__(self, source, apple):
+        super().__init__()
+        self.source, self.apple = source, apple
+
+    def run(self):
+        try:
+            if self.apple:
+                archive = read_backup(self.source)
+            else:
+                path = Path(self.source)
+                if path.stat().st_size > 32 * 1024 * 1024:
+                    raise ValueError('记录文件异常过大，请检查所选文件。')
+                with path.open('rb') as stream:
+                    archive = plistlib.load(stream)
+            destination = state_path().parent / 'record-backups' / f'records-{uuid.uuid4()}.plist'
+            save_archive(archive, destination)
+            counts = import_archive(archive, UserState())
+            self.completed.emit({**counts, 'backup': str(destination)}, '')
+        except Exception as error:
+            self.completed.emit(None, str(error))
+
+
 class Window(QMainWindow):
     def __init__(self, settings, preview=False):
         super().__init__()
         self.settings, self.preview = settings, preview
         self.service = Service()
         self.worker = None
+        self.import_worker = None
         self.setWindowTitle('局域影院 · 电脑端')
         self.setMinimumSize(760, 700)
         self.resize(900, 760)
@@ -210,6 +241,14 @@ class Window(QMainWindow):
         note.setWordWrap(True)
         note.setObjectName('secondary')
         side.addWidget(note)
+        self.records_button = QPushButton('记录备份与恢复')
+        record_menu = QMenu(self.records_button)
+        record_menu.addAction('从 iPhone 的电脑备份导入…', lambda: self.import_records(True))
+        record_menu.addAction('导入 App 导出的记录…', lambda: self.import_records(False))
+        record_menu.addAction('导出电脑同步库副本…', self.export_records)
+        record_menu.addAction('打开记录保存位置', self.open_records_folder)
+        self.records_button.setMenu(record_menu)
+        side.addWidget(self.records_button)
         side.addStretch()
         columns.addWidget(connect, 1)
         self.notice = QLabel('仅共享所选目录及子目录，手机端不能修改电脑文件。')
@@ -242,6 +281,60 @@ class Window(QMainWindow):
         self.showNormal()
         self.raise_()
         self.activateWindow()
+
+    def open_records_folder(self):
+        folder = state_path().parent
+        folder.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+
+    def export_records(self):
+        source = state_path()
+        if not source.exists():
+            QMessageBox.information(self, '尚无电脑记录', '请先从旧 App 的电脑备份导入，或用支持同步的新版 App 连接。')
+            return
+        value, _ = QFileDialog.getSaveFileName(self, '导出电脑同步库副本', 'LanCinema-records.sqlite3', 'SQLite 数据库 (*.sqlite3)')
+        if not value:
+            return
+        destination = Path(value).resolve()
+        if destination == source.resolve():
+            QMessageBox.warning(self, '请选择其他位置', '不能覆盖正在使用的同步数据库。')
+            return
+        try:
+            # SQLite's backup API also takes a consistent copy during synchronization.
+            with sqlite3.connect(source.as_uri() + '?mode=ro', uri=True) as src, sqlite3.connect(destination) as dst:
+                src.backup(dst)
+            QMessageBox.information(self, '已导出电脑记录', '副本已保存。收藏、观看进度和偏好均在此数据库内。')
+        except Exception as error:
+            QMessageBox.warning(self, '未能导出', str(error))
+
+    def import_records(self, apple):
+        if self.import_worker and self.import_worker.isRunning():
+            return
+        if apple:
+            initial = Path.home() / 'Apple/MobileSync/Backup'
+            if not initial.exists():
+                initial = Path(os.environ.get('APPDATA', str(Path.home()))) / 'Apple Computer/MobileSync/Backup'
+            value = QFileDialog.getExistingDirectory(self, '选择包含 Manifest.db 的已完成 iPhone 备份文件夹', str(initial))
+        else:
+            value, _ = QFileDialog.getOpenFileName(self, '选择局域影院导出的记录备份', '', '记录备份 (*.plist)')
+        if not value:
+            return
+        self.records_button.setEnabled(False)
+        self.import_worker = RecordImportWorker(value, apple)
+        self.import_worker.completed.connect(self.records_imported)
+        self.import_worker.start()
+
+    def records_imported(self, counts, error):
+        self.records_button.setEnabled(True)
+        if error:
+            QMessageBox.warning(self, '尚未完成备份导入', error + '\n\n请保留旧 App，确认记录可恢复后再升级。')
+            return
+        message = (f'已处理收藏 {counts["favorite"]} 条、观看进度 {counts["history"]} 条，涉及 {counts["libraries"]} 个共享目录配置。\n'
+                   f'原始记录副本：\n{counts["backup"]}\n\n'
+                   '重复项保留电脑已确认的记录。升级后连接同一共享目录配置即可同步；请先核对上述数量，并保留旧 App 和备份。')
+        if counts['skipped']:
+            message += f'\n\n有 {counts["skipped"]} 项格式异常未导入，已保留在原始副本，请先排查再升级。'
+        QMessageBox.information(self, '记录已保存到电脑并读回校验', message)
 
     def choose_folder(self):
         selected = self.folders.currentItem()
@@ -328,6 +421,9 @@ class Window(QMainWindow):
             self.exit_app()
 
     def exit_app(self):
+        if self.import_worker and self.import_worker.isRunning():
+            self.status.setText('正在备份记录，请稍候再退出。')
+            return
         if self.worker and self.worker.isRunning():
             self.status.setText('正在保存，请稍候再退出。')
             return

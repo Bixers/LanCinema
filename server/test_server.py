@@ -105,8 +105,10 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.request(path='missing.mp4')[0], 404)
 
     def test_no_writes(self):
-        self.assertEqual(self.request(method='POST')[0], 501)
+        original = (self.folder / 'clip.mkv').read_bytes()
+        self.assertEqual(self.request(method='POST')[0], 404)
         self.assertEqual(self.request(method='DELETE')[0], 501)
+        self.assertEqual((self.folder / 'clip.mkv').read_bytes(), original)
 
     def test_search_includes_nested_files(self):
         status, _, body = self.request('/api/search', '', query={'q': 'CLIP'})

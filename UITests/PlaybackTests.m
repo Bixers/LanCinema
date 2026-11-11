@@ -85,6 +85,38 @@
     XCTAssertFalse(self.app.staticTexts[@"时间戳偏移测试.ts"].exists);
     [self capture:@"history-completed-removed"];
 }
+- (void)waitForUserSync {
+    NSPredicate *done = [NSPredicate predicateWithFormat:@"label CONTAINS %@ AND label CONTAINS %@", @"已同步到电脑", @"待同步：0 项"];
+    XCTAssertTrue([[self.app.staticTexts matchingPredicate:done].firstMatch waitForExistenceWithTimeout:20]);
+}
+- (void)testUserSyncRestoresLocalRecords {
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    [self favoriteElement:self.app.staticTexts[@"演示文件夹"] action:@"加入收藏"];
+    [self.app.buttons[@"showUserSync"] tap];
+    [self waitForUserSync];
+    [self capture:@"sync-portrait"];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationLandscapeLeft;
+    [self capture:@"sync-landscape"];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationPortrait;
+    [self.app terminate]; self.app.launchArguments = @[@"--ui-test-drop-local-records"]; [self.app launch];
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    [self.app.buttons[@"showUserSync"] tap]; [self waitForUserSync];
+    [[self.app.navigationBars.buttons elementBoundByIndex:0] tap];
+    [self.app.buttons[@"favorites"] tap];
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:10]);
+    [self capture:@"sync-restored-favorite"];
+}
+- (void)testUserSyncAccessibleAppearance {
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    [self.app terminate]; self.app.launchArguments = @[@"--ui-test-dark", @"--ui-test-large"]; [self.app launch];
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    [self.app.buttons[@"showUserSync"] tap]; [self waitForUserSync];
+    [self capture:@"sync-dark-large"];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationLandscapeLeft;
+    [self capture:@"sync-dark-landscape"];
+    [self.app.tables[@"userSyncList"] swipeUp];
+    [self capture:@"sync-upgrade-instructions"];
+}
 - (void)favoriteElement:(XCUIElement *)element action:(NSString *)action {
     XCTAssertTrue([element waitForExistenceWithTimeout:15]);
     [element pressForDuration:1.1];

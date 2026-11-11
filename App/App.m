@@ -9,6 +9,7 @@
 #import "VideoGeometry.h"
 #import "PlaybackHistory.h"
 #import "Favorites.h"
+#import "UserSync.h"
 #import "PlaybackHealth.h"
 #import "PlaybackPanels.h"
 
@@ -1142,7 +1143,10 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     history.accessibilityIdentifier = @"continueWatching";
     UIBarButtonItem *favorites = [[UIBarButtonItem alloc] initWithTitle:@"收藏" style:UIBarButtonItemStylePlain target:self action:@selector(showFavorites)];
     favorites.accessibilityIdentifier = @"favorites";
-    self.toolbarItems = @[[UIBarButtonItem flexibleSpaceItem], favorites, [UIBarButtonItem flexibleSpaceItem], history, [UIBarButtonItem flexibleSpaceItem]];
+    UIBarButtonItem *sync = [[UIBarButtonItem alloc] initWithTitle:@"同步" style:UIBarButtonItemStylePlain target:self action:@selector(showSync)];
+    sync.accessibilityIdentifier = @"showUserSync";
+    self.toolbarItems = @[[UIBarButtonItem flexibleSpaceItem], favorites, [UIBarButtonItem flexibleSpaceItem], history, [UIBarButtonItem flexibleSpaceItem], sync, [UIBarButtonItem flexibleSpaceItem]];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(syncChanged:) name:LCUserSyncChanged object:nil];
     [self updateViewMenu];
     [self updateSortMenu];
     UISearchController *search = [[UISearchController alloc] initWithSearchResultsController:nil];
@@ -1206,6 +1210,11 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     __weak typeof(self) owner = self;
     favorites.openItem = ^(NSDictionary *item) { [owner openFileItem:item]; };
     [self.navigationController pushViewController:favorites animated:YES];
+}
+- (void)showSync { [self.navigationController pushViewController:[LCUserSyncController new] animated:YES]; }
+- (void)syncChanged:(NSNotification *)note {
+    if (![note.userInfo[@"recordsChanged"] boolValue]) return;
+    [self updateViewMenu]; [self updateSortMenu]; [self applyFileSort];
 }
 - (BOOL)isFavorite:(NSDictionary *)item {
     return [LCFavorites.shared containsPath:item[@"path"] host:[NSUserDefaults.standardUserDefaults stringForKey:HostKey]
@@ -1473,6 +1482,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
             if (status == 200 && [json isKindOfClass:NSDictionary.class] && [json[@"items"] isKindOfClass:NSArray.class]) {
                 if ([json[@"root"] isKindOfClass:NSString.class]) [NSUserDefaults.standardUserDefaults setObject:json[@"root"] forKey:@"sharedRoot"];
                 if ([json[@"libraryID"] isKindOfClass:NSString.class]) [NSUserDefaults.standardUserDefaults setObject:json[@"libraryID"] forKey:@"libraryID"];
+                [LCUserSync.shared connectHost:[NSUserDefaults.standardUserDefaults stringForKey:HostKey] library:json[@"libraryID"] URL:ServiceURL(@"/api/sync", nil)];
                 if (!searching) { s.items = json[@"items"]; s.itemsLoaded = YES; }
                 s.visibleItems = json[@"items"];
                 s.skippedSearchItems = searching ? [json[@"skipped"] integerValue] : 0;
@@ -1659,7 +1669,12 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     if ([NSProcessInfo.processInfo.arguments containsObject:@"--ui-test"]) {
         [NSUserDefaults.standardUserDefaults removePersistentDomainForName:NSBundle.mainBundle.bundleIdentifier];
         [NSUserDefaults.standardUserDefaults setObject:@"127.0.0.1" forKey:HostKey];
+        [NSUserDefaults.standardUserDefaults setObject:NSUUID.UUID.UUIDString forKey:@"uiTestSyncScope"];
         LCStorePassword(@"ui-test-access-code");
+    }
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"--ui-test-drop-local-records"]) {
+        [NSUserDefaults.standardUserDefaults removeObjectForKey:@"favoritesV1"];
+        [NSUserDefaults.standardUserDefaults removeObjectForKey:@"playbackHistoryV1"];
     }
 #endif
     return YES;

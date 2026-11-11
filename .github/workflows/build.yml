@@ -14,6 +14,10 @@ on:
         description: 'Validate favorites, browser, history and all unit/audio tests'
         type: boolean
         default: false
+      sync:
+        description: 'Validate data sync, backup restore, favorites and all unit/audio tests'
+        type: boolean
+        default: false
       playback:
         description: 'Validate seek recovery, diagnostics, continue watching and audio'
         type: boolean
@@ -100,7 +104,7 @@ jobs:
       - name: Run server checks
         run: |
           python3 -m pip install --break-system-packages imageio-ffmpeg
-          cd server && python3 -m unittest -v test_server.py test_multi_root.py test_video_probe.py test_playback_cache.py test_thumbnails.py
+          cd server && python3 -m unittest -v test_server.py test_multi_root.py test_video_probe.py test_playback_cache.py test_thumbnails.py test_user_state.py
       - name: Compile simulator tests
         run: |
           set -o pipefail
@@ -181,7 +185,15 @@ jobs:
           PY
           set -o pipefail
           TEST_SELECTION=()
-          if [ '${{ inputs.favorites }}' = 'true' ]; then
+          if [ '${{ inputs.sync }}' = 'true' ]; then
+            TEST_SELECTION=(
+              '-only-testing:LanCinemaUITests/PlaybackTests/testUserSyncRestoresLocalRecords'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testUserSyncAccessibleAppearance'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testFavoritesDetailsPersistenceAndOpen'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testContinueWatchingPersistenceAndCompletion'
+              '-only-testing:LanCinemaTests'
+            )
+          elif [ '${{ inputs.favorites }}' = 'true' ]; then
             TEST_SELECTION=(
               '-only-testing:LanCinemaUITests/PlaybackTests/testFavoritesDetailsPersistenceAndOpen'
               '-only-testing:LanCinemaUITests/PlaybackTests/testFavoritesIconsSearchAndRemove'

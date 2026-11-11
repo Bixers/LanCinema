@@ -1,5 +1,6 @@
 #import "Favorites.h"
 #import "FilePresentation.h"
+#import "UserSync.h"
 #import <math.h>
 
 static NSString *const FavoritesKey = @"favoritesV1";
@@ -42,6 +43,7 @@ static NSString *const FavoritesKey = @"favoritesV1";
     return NO;
 }
 - (void)removePath:(NSString *)path host:(NSString *)host library:(NSString *)library {
+    LCQueueUserChange(self.defaults, @"favorite", path, nil, host, library);
     NSMutableArray *records = [[self allRecords] mutableCopy];
     NSIndexSet *matches = [records indexesOfObjectsPassingTest:^BOOL(NSDictionary *r, NSUInteger i, BOOL *stop) {
         return [self record:r matchesHost:host library:library] && [r[@"item"][@"path"] isEqual:path];
@@ -63,7 +65,9 @@ static NSString *const FavoritesKey = @"favoritesV1";
     metadata[@"directory"] = @([item[@"directory"] boolValue]);
     metadata[@"video"] = @([item[@"video"] boolValue]);
     NSMutableArray *records = [[self allRecords] mutableCopy];
-    [records insertObject:@{@"host":host, @"library":library, @"item":metadata} atIndex:0];
+    NSNumber *updated = @(NSDate.date.timeIntervalSince1970);
+    LCQueueUserChange(self.defaults, @"favorite", item[@"path"], @{@"item":metadata, @"updated":updated}, host, library);
+    [records insertObject:@{@"host":host, @"library":library, @"item":metadata, @"updated":updated} atIndex:0];
     [self.defaults setObject:records forKey:FavoritesKey];
 }
 @end
@@ -78,6 +82,7 @@ static NSString *const FavoritesKey = @"favoritesV1";
 @implementation LCFavoritesController
 - (void)viewDidLoad {
     [super viewDidLoad]; self.title = @"收藏";
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(syncChanged:) name:LCUserSyncChanged object:nil];
     self.tableView.accessibilityIdentifier = @"favoritesList";
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 110;
@@ -132,6 +137,7 @@ static NSString *const FavoritesKey = @"favoritesV1";
     [self.tableView reloadData];
     [self.view setNeedsLayout];
 }
+- (void)syncChanged:(NSNotification *)note { if ([note.userInfo[@"recordsChanged"] boolValue]) [self reloadFavorites]; }
 - (void)setEditing:(BOOL)editing animated:(BOOL)animated {
     [super setEditing:editing animated:animated];
     self.navigationItem.rightBarButtonItem.title = editing ? @"完成" : @"编辑";

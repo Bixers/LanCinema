@@ -16,6 +16,8 @@ from urllib.parse import parse_qs, urlsplit
 from playback_cache import PlaybackCache, TRANSPORT_STREAMS
 from shared_library import normalize_roots, mount_names
 from thumbnails import ThumbnailCache
+from user_state import UserState
+import sqlite3
 
 ROOT = Path(r"G:\123")
 VIDEO = {'.mp4', '.mkv', '.avi', '.mov', '.m4v', '.webm', '.wmv', '.flv', '.ts', '.m2ts', '.mts', '.mpg', '.mpeg', '.vob', '.3gp', '.ogv', '.rm', '.rmvb', '.asf', '.divx'}
@@ -26,12 +28,13 @@ class MediaServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, address, root, token):
+    def __init__(self, address, root, token, state_path=None):
         self.roots = normalize_roots(root)
         self.root = self.roots[0]
         self.mounts = mount_names(self.roots) if len(self.roots) > 1 else {}
         self.root_label = f'共享文件夹（{len(self.roots)} 个）' if self.mounts else str(self.root)
         self.token = token
+        self.user_state = UserState(state_path)
         identity = json.dumps(sorted(str(p) for p in self.roots), ensure_ascii=False) if self.mounts else str(self.root)
         self.library_id = hashlib.sha256(identity.encode()).hexdigest()[:16]
         self.playback_cache = PlaybackCache()
@@ -132,6 +135,38 @@ class Handler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         self.do_GET()
 
+    def sync_store(self):
+        return self.server.user_state
+
+    def do_POST(self):
+        # Always close after POST, including rejected/unread bodies.
+        self.close_connection = True
+        route = urlsplit(self.path)
+        token = parse_qs(route.query, keep_blank_values=True).get('token', [''])[0]
+        if not hmac.compare_digest(token.encode(), self.server.token.encode()):
+            return self.error(401, '访问码不正确')
+        if route.path != '/api/sync':
+            return self.error(404, '接口不存在')
+        try:
+            if self.headers.get('Transfer-Encoding'):
+                return self.error(400, '不支持分块请求')
+            length = int(self.headers.get('Content-Length', '0'))
+            if not 0 < length <= 2 * 1024 * 1024:
+                return self.error(413, '同步请求过大或为空')
+            self.connection.settimeout(15)
+            raw = self.rfile.read(length)
+            if len(raw) != length:
+                return self.error(400, '同步请求不完整')
+            payload = json.loads(raw)
+            if isinstance(payload, dict) and payload.get('libraryID') != self.server.library_id:
+                return self.error(409, '共享目录已改变，请刷新文件库')
+            result = self.sync_store().exchange(self.server.library_id, payload)
+            return self.reply(409 if result.get('identityChanged') else 200, json.dumps(result, ensure_ascii=False).encode())
+        except (ValueError, TypeError, KeyError, OverflowError):
+            self.error(400, '无效的同步记录')
+        except (OSError, sqlite3.Error):
+            self.error(503, '电脑无法保存记录，请检查磁盘空间及数据文件权限')
+
     def do_GET(self):
         try:
             route = urlsplit(self.path)
@@ -140,7 +175,7 @@ class Handler(BaseHTTPRequestHandler):
             if not hmac.compare_digest(token.encode(), self.server.token.encode()):
                 return self.error(401, '访问码不正确')
             if route.path == '/api/info':
-                return self.reply(200, json.dumps({'name': socket.gethostname(), 'root': self.server.root_label, 'libraryID': self.server.library_id}, ensure_ascii=False).encode())
+                return self.reply(200, json.dumps({'name': socket.gethostname(), 'root': self.server.root_label, 'libraryID': self.server.library_id, 'syncProtocol': 1}, ensure_ascii=False).encode())
             if route.path not in ('/api/list', '/api/search', '/api/crop', '/api/playback', '/api/thumbnail', '/media'):
                 return self.error(404, '接口不存在')
             relative = query.get('path', [''])[0]

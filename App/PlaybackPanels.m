@@ -1,6 +1,7 @@
 #import "PlaybackPanels.h"
 #import "PlaybackHistory.h"
 #import "FilePresentation.h"
+#import "UserSync.h"
 
 static NSString *HistoryTime(double seconds) {
     NSInteger s = MAX(0, (NSInteger)seconds);
@@ -15,6 +16,7 @@ static NSString *HistoryTime(double seconds) {
 @implementation LCHistoryController
 - (void)viewDidLoad {
     [super viewDidLoad]; self.title = @"继续观看";
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(syncChanged:) name:LCUserSyncChanged object:nil];
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 120;
     self.tableView.sectionFooterHeight = UITableViewAutomaticDimension;
@@ -61,6 +63,7 @@ static NSString *HistoryTime(double seconds) {
     footer.contentConfiguration = content;
     return footer;
 }
+- (void)syncChanged:(NSNotification *)note { if ([note.userInfo[@"recordsChanged"] boolValue]) [self reloadHistory]; }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"history"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"history"];

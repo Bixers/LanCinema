@@ -1,4 +1,5 @@
 #import "PlaybackHistory.h"
+#import "UserSync.h"
 #import <math.h>
 
 static NSString *const HistoryKey = @"playbackHistoryV1";
@@ -56,6 +57,7 @@ NSString *LCProgressKey(NSString *host, NSString *library, NSString *path) {
     return isfinite(legacy) && legacy > 0 ? legacy : 0;
 }
 - (void)removePath:(NSString *)path host:(NSString *)host library:(NSString *)library {
+    LCQueueUserChange(self.defaults, @"history", path, nil, host, library);
     NSMutableArray *records = [[self allRecords] mutableCopy];
     NSIndexSet *matches = [records indexesOfObjectsPassingTest:^BOOL(NSDictionary *r, NSUInteger i, BOOL *stop) {
         return [self record:r matchesHost:host library:library] && [r[@"item"][@"path"] isEqual:path];
@@ -75,13 +77,15 @@ NSString *LCProgressKey(NSString *host, NSString *library, NSString *path) {
     }
     metadata[@"name"] = metadata[@"name"] ?: [item[@"path"] lastPathComponent];
     metadata[@"video"] = @YES;
+    NSNumber *updated = @(NSDate.date.timeIntervalSince1970);
+    LCQueueUserChange(self.defaults, @"history", item[@"path"], @{@"item":metadata, @"position":@(position), @"duration":@(duration), @"updated":updated}, host, library);
     NSMutableArray *records = [[self allRecords] mutableCopy];
     NSIndexSet *matches = [records indexesOfObjectsPassingTest:^BOOL(NSDictionary *r, NSUInteger i, BOOL *stop) {
         return [self record:r matchesHost:host library:library] && [r[@"item"][@"path"] isEqual:item[@"path"]];
     }];
     [records removeObjectsAtIndexes:matches];
     [records insertObject:@{@"host":host ?: @"", @"library":library ?: @"", @"item":metadata,
-                           @"position":@(position), @"duration":@(duration), @"updated":@(NSDate.date.timeIntervalSince1970)} atIndex:0];
+                           @"position":@(position), @"duration":@(duration), @"updated":updated} atIndex:0];
     if (records.count > 100) {
         for (NSDictionary *old in [records subarrayWithRange:NSMakeRange(100, records.count - 100)])
             [self.defaults removeObjectForKey:LCProgressKey(old[@"host"], old[@"library"], old[@"item"][@"path"])];
