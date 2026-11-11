@@ -16,3 +16,6 @@ settings.json
 .env
 *.p12
 *.mobileprovision
+user-state.sqlite3*
+record-backups/
+.impeccable/review/

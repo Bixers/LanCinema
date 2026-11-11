@@ -1,6 +1,12 @@
-# 局域影院 · iOS 1.8.0 / 电脑端 1.4.2
+# 局域影院 · iOS 1.9.0 / 电脑端 1.5.0
 
 Windows 电脑文件夹的 iPhone 浏览与播放客户端。默认共享 `G:\123`，可在电脑端添加多个文件夹，支持跨盘符。支持嵌套目录、递归搜索、长名称换行、VLC 多格式播放、进度记忆、0.5～3 倍速和长按临时倍速。
+
+iOS 1.9.0 / build 19 与电脑端 1.5.0 新增收藏、观看进度及非敏感偏好的双端保存。手机底部“同步”显示状态和待同步数量，并可导出记录；电脑端“记录备份与恢复”可导入 Apple 电脑备份或 App 导出的记录。离线操作保留在手机，重连后同步。电脑数据保存在 `%LOCALAPPDATA%\LanCinema\user-state.sqlite3`，不写入视频目录。
+
+**首次从旧 App 升级时，不能仅更新电脑端就通过局域网取出旧记录。旧 App 没有上传接口。** 如需升级前先在电脑保存记录，请先连接当前 iPhone，完成电脑备份并导入、核对数量，再覆盖安装新版；不要先卸载。当前导入器支持未加密的 Apple 备份，加密备份会明确拒绝。详见[升级前备份及双端同步说明](SYNC.md)。
+
+以下为此前版本功能记录；旧版中“仅保存在手机”的限制由 1.9.0 的双端同步扩展。
 
 iOS 1.8.0 / build 18 新增收藏。**本次只需更新 IPA，电脑端继续使用 1.4.2。** 在详细信息、图标视图或递归搜索结果中，长按视频或文件夹，选择“加入收藏”；再次长按可取消。文件库底部“收藏”集中显示已保存项目，最近收藏在前，保留实际视频封面、完整名称及所在路径，点选可播放或进入文件夹。列表左滑或“编辑”可取消收藏，不删除原文件，也不影响观看进度。
 
@@ -54,7 +60,7 @@ build 5 增加画面横向拖动调节进度：右滑快进、左滑后退，滑
 
 ## 使用
 
-1. 从托盘退出旧服务后运行 `LanCinema-PC-1.4.2.exe`，点击“添加文件夹…”添加一个或多个共享目录（支持跨盘符），设置至少 8 位连接密码，点击“保存并应用”。设置保存到 `%LOCALAPPDATA%\LanCinema\settings.json`，密码使用 Windows DPAPI 加密。
+1. 首次升级先按 [SYNC.md](SYNC.md) 备份并核对旧记录。从托盘退出旧服务后运行 `LanCinema-PC-1.5.0.exe`，点击“添加文件夹…”添加一个或多个共享目录（支持跨盘符），设置至少 8 位连接密码，点击“保存并应用”。设置保存到 `%LOCALAPPDATA%\LanCinema\settings.json`，密码使用 Windows DPAPI 加密。
 2. “登录 Windows 后自动启动”可开关；默认开启。关闭窗口后在托盘继续运行；右键托盘图标可退出。修改 EXE 所在位置后，请重新打开并保存设置以更新自启路径。
 3. 手机和电脑在同一局域网。App 可自动发现电脑并输入密码连接，或扫描电脑端二维码（也支持从相册识别）。发现受阻时可手动填写电脑端显示的 IPv4 地址。固定端口 8123。允许 App 使用本地网络；相机权限仅用于扫码。
 4. 手机连接成功后保存地址，密码放入 iOS 钥匙串。修改共享目录后返回文件库首页并刷新；修改电脑密码后需重新连接。
@@ -63,6 +69,8 @@ build 5 增加画面横向拖动调节进度：右滑快进、左滑后退，滑
 电脑关闭、休眠或退出服务时不能继续访问。视频不转码，经局域网 HTTP 传输；自动黑边检测仅在本地解码少量帧，不上传视频。
 
 ## 构建与验证
+
+1.9.0 / build 19 的[最终同步与恢复回归](https://github.com/Bixers/LanCinema/actions/runs/42959464266)通过，生产源码为 `bf14065e39b7bfed6be503f60a5321c9205220d2`：iPhone 17 Pro / iOS 26.5 模拟器 4 项原生 UI、33 项单元及音频测试全部通过。覆盖真实 HTTP 上传收藏、清除手机本地记录后从电脑恢复、原有收藏与继续观看、首次迁移快照、离线队列、删除标记、旧回执、IP 迁移、异常响应及旧 TS 进度。Windows 56 项检查中 55 项通过、1 项符号链接权限跳过；冻结 EXE 29 项检查与独立启动通过，并用合成 Apple 备份验证实际桌面导入、独立副本及数据库读回。使用合成记录和媒体；这不等于已提取用户实体 iPhone 的真实收藏，真实备份核验及签名覆盖安装仍须在升级前完成。
 
 1.8.0 / build 18 已通过[收藏界面回归](https://github.com/Bixers/LanCinema/actions/runs/42347720711)及[单元/音频复测](https://github.com/Bixers/LanCinema/actions/runs/42348779706)：iPhone 17 Pro / iOS 26.5 模拟器 最终生产源码分别通过 5 项原生 UI 测试和 27 项单元/音频测试。界面回归轮中，原有 EOF 回看音频恢复曾测得 1.628 秒，超过 1 秒要求；同一生产源码在新模拟器上独立复测全部单元/音频测试通过，未放宽阈值或修改音频实现。覆盖视频与文件夹收藏、重启保留、从收藏播放/进入目录、左滑及编辑取消、图标与递归搜索、同名文件区分、深色大字体，以及既有文件浏览和继续观看流程。收藏单元测试检查按电脑和共享目录隔离、去重、顺序、不影响历史记录、无效记录过滤、超过 100 项仍保留。服务端 39 项检查中 38 项通过、1 项 Windows 跨盘符检查跳过。使用合成素材；未在用户实体 iPhone / iOS 26.6 上验证。
 
@@ -86,7 +94,7 @@ IPA：GitHub Actions 使用 macOS、Xcode 26.6、XcodeGen、CocoaPods 与 Mobile
 
 Windows 10/11：Python 3.9+，安装 `server/requirements-desktop.txt`，运行 `python -m PyInstaller --noconfirm LanCinema-PC.spec`。独立 EXE 内含 Python、Qt、二维码、Bonjour 与 FFmpeg，不要求使用者另装 Python。
 
-测试：`cd server` 后运行 `python -m unittest -v test_server.py test_multi_root.py test_video_probe.py test_playback_cache.py test_thumbnails.py`；Windows 另运行 `test_desktop.py`。
+测试：`cd server` 后运行 `python -m unittest -v test_server.py test_multi_root.py test_video_probe.py test_playback_cache.py test_thumbnails.py test_user_state.py`；Windows 另运行 `test_desktop.py`。
 
 ## 数据与依赖
 
