@@ -177,7 +177,11 @@ void LCQueueUserChange(NSUserDefaults *defaults, NSString *kind, NSString *key, 
     } else if (path.section == 1) {
         content.text = path.row == 0 ? @"立即同步" : @"导出手机记录备份…";
         content.image = [UIImage systemImageNamed:path.row == 0 ? @"arrow.triangle.2.circlepath" : @"square.and.arrow.up"];
-        content.textProperties.color = self.view.tintColor;
+        UIColor *actionColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits) {
+            return traits.userInterfaceStyle == UIUserInterfaceStyleDark ? UIColor.systemTealColor : [UIColor colorWithRed:0 green:.40 blue:.42 alpha:1];
+        }];
+        content.textProperties.color = actionColor;
+        content.imageProperties.tintColor = actionColor;
         cell.accessibilityIdentifier = path.row == 0 ? @"syncNow" : @"exportUserBackup";
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else {
