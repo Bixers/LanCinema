@@ -16,7 +16,9 @@ if __name__ == '__main__':
     # Reuse synthetic media to exercise real Foundation-to-Python URL handling.
     special = root / '符号+ &%# 测试'
     special.mkdir(exist_ok=True)
-    shutil.copyfile(root / '演示文件夹' / '时间戳偏移测试.ts', root / '演示文件夹' / '封装识别测试.mp4')
+    # Keep the original playback fixture directory's viewport stable. Adding a
+    # row there can move its TS filename underneath the pinned browser footer.
+    shutil.copyfile(root / '演示文件夹' / '时间戳偏移测试.ts', special / '封装识别测试.mp4')
     for original, name in [('测试视频.mkv', '视频+ &%# 测试.mkv'),
                            ('测试视频.mkv', '视频 空格.mkv'),
                            ('时间戳偏移测试.ts', '视频+ &%# 测试.ts')]:

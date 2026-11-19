@@ -703,13 +703,13 @@
     [self closePlayback];
 }
 - (void)testTransportStreamDurationSeekingAndResume {
-    [self checkTransportStreamDurationSeekingAndResume:@"时间戳偏移测试.ts"];
+    [self checkTransportStreamDurationSeekingAndResume:@"时间戳偏移测试.ts" folder:@"演示文件夹"];
 }
 - (void)testMisnamedMP4DurationSeekingAndResume {
-    [self checkTransportStreamDurationSeekingAndResume:@"封装识别测试.mp4"];
+    [self checkTransportStreamDurationSeekingAndResume:@"封装识别测试.mp4" folder:@"符号+ &%# 测试"];
 }
-- (void)checkTransportStreamDurationSeekingAndResume:(NSString *)filename {
-    XCUIElement *folder = self.app.staticTexts[@"演示文件夹"];
+- (void)checkTransportStreamDurationSeekingAndResume:(NSString *)filename folder:(NSString *)folderName {
+    XCUIElement *folder = self.app.staticTexts[folderName];
     XCTAssertTrue([folder waitForExistenceWithTimeout:20]);
     [folder tap];
     XCUIElement *movie = self.app.staticTexts[filename];
