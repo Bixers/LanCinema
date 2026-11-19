@@ -64,6 +64,15 @@ class ServerTests(unittest.TestCase):
         self.assertEqual((status, len(body)), (200, 1024))
         self.assertEqual(body, bytes(range(256)) * 4)
 
+    def test_non_ts_preflight_keeps_direct_stream_and_range_bytes(self):
+        status, _, body = self.request('/api/playback')
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {'state': 'ready', 'indexed': False})
+        status, _, body = self.request(headers={'Range': 'bytes=31-127'})
+        self.assertEqual((status, body), (206, (bytes(range(256)) * 4)[31:128]))
+        self.assertEqual(self.request(query={'prepared': '1'})[0], 400)
+        self.assertEqual(self.request('/api/playback', path='caption.srt')[0], 400)
+
     def test_seek_ranges(self):
         for requested, expected, content in [
             ('bytes=10-19', bytes(range(10, 20)), 'bytes 10-19/1024'),

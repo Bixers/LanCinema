@@ -12,6 +12,25 @@ import time
 TRANSPORT_STREAMS = {'.ts', '.mts', '.m2ts'}
 
 
+def requires_indexed_playback(source):
+    """Recognize TS packets even when a download was named .mp4.
+
+    Read only a small header on playback requests, not every directory entry.
+    Five consecutive headers avoid treating a stray 0x47 as a transport stream.
+    Support standard TS, Blu-ray M2TS and 204-byte error-correction packets.
+    """
+    if source.suffix.lower() in TRANSPORT_STREAMS:
+        return True
+    with source.open('rb') as stream:
+        header = stream.read(4096)
+    for stride in (188, 192, 204):
+        for offset in range(min(stride, max(0, len(header) - 4 * stride - 3))):
+            if all(header[offset + i * stride] == 0x47 and
+                   header[offset + i * stride + 3] & 0x30 for i in range(5)):
+                return True
+    return False
+
+
 class PlaybackCache:
     def __init__(self, directory=None):
         base = Path(os.environ.get('LOCALAPPDATA', tempfile.gettempdir()))
@@ -105,7 +124,7 @@ class PlaybackCache:
                 # Some broadcast subtitle codecs cannot be stored in Matroska.
                 fallback = True
                 if not self._remux(source, temporary, subtitles=False):
-                    raise RuntimeError('无法准备该 TS 视频，请检查文件是否完整或加密')
+                    raise RuntimeError('无法准备该视频，请检查文件是否完整或加密')
             if self.closed:
                 raise RuntimeError('文件服务已停止')
             if self.key(source) != key or not temporary.stat().st_size:

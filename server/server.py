@@ -13,7 +13,7 @@ import ipaddress
 import unicodedata
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
-from playback_cache import PlaybackCache, TRANSPORT_STREAMS
+from playback_cache import PlaybackCache, requires_indexed_playback
 from shared_library import normalize_roots, mount_names
 from thumbnails import ThumbnailCache
 from user_state import UserState
@@ -210,9 +210,11 @@ class Handler(BaseHTTPRequestHandler):
                 status, data = self.server.thumbnail_cache.get(path)
                 return self.reply(status, data, 'image/jpeg', {'Retry-After': '2'} if status == 503 else None)
             if route.path == '/api/playback':
-                if not path.is_file() or path.suffix.lower() not in TRANSPORT_STREAMS:
-                    return self.error(400, '不是 TS 视频')
-                return self.reply(200, json.dumps(self.server.playback_cache.prepare(path), ensure_ascii=False).encode())
+                if not path.is_file() or path.suffix.lower() not in VIDEO:
+                    return self.error(400, '不是视频文件')
+                indexed = requires_indexed_playback(path)
+                result = self.server.playback_cache.prepare(path) if indexed else {'state': 'ready'}
+                return self.reply(200, json.dumps(dict(result, indexed=indexed), ensure_ascii=False).encode())
             if route.path == '/api/crop':
                 if not path.is_file() or path.suffix.lower() not in VIDEO:
                     return self.error(400, '不是视频文件')
@@ -244,8 +246,8 @@ class Handler(BaseHTTPRequestHandler):
             if not path.is_file():
                 return self.error(404, '不是文件')
             if query.get('prepared', [''])[0] == '1':
-                if path.suffix.lower() not in TRANSPORT_STREAMS:
-                    return self.error(400, '不是 TS 视频')
+                if path.suffix.lower() not in VIDEO or not requires_indexed_playback(path):
+                    return self.error(400, '该视频不需要索引缓存')
                 path = self.server.playback_cache.ready_path(path)
                 if path is None:
                     return self.error(425, '视频尚未准备完成，请重新打开')

@@ -207,6 +207,7 @@ jobs:
               '-only-testing:LanCinemaUITests/PlaybackTests/testContinueWatchingPersistenceAndCompletion'
               '-only-testing:LanCinemaUITests/PlaybackTests/testDiagnosticsAndHistoryAccessibleAppearance'
               '-only-testing:LanCinemaUITests/PlaybackTests/testTransportStreamDurationSeekingAndResume'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testMisnamedMP4DurationSeekingAndResume'
               '-only-testing:LanCinemaUITests/PlaybackTests/testSeekAndReplayAfterVideoEnds'
               '-only-testing:LanCinemaUITests/PlaybackTests/testHorizontalCanvasSeekingWithoutGestureConflicts'
               '-only-testing:LanCinemaUITests/PlaybackTests/testControlsAutoHideAndTapToggle'

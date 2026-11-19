@@ -63,6 +63,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 @property(nonatomic) BOOL subtitleFallback;
 @property(nonatomic) BOOL preparing;
 @property(nonatomic) BOOL prepared;
+@property(nonatomic) BOOL indexedPlayback;
 @property(nonatomic, strong) VLCMediaPlayer *player;
 @property(nonatomic, strong) LCAudioOutput *audioOutput;
 @property(nonatomic, strong) UIView *canvas;
@@ -134,7 +135,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 @end
 
 @implementation PlayerController
-- (BOOL)isTransportStream { return [@[@"ts", @"mts", @"m2ts"] containsObject:[self.item[@"path"] pathExtension].lowercaseString]; }
+- (BOOL)isTransportStream { return self.indexedPlayback || [@[@"ts", @"mts", @"m2ts"] containsObject:[self.item[@"path"] pathExtension].lowercaseString]; }
 - (NSString *)progressKey {
     return LCProgressKey(self.historyHost ?: [NSUserDefaults.standardUserDefaults stringForKey:HostKey],
                          self.historyLibrary ?: [NSUserDefaults.standardUserDefaults stringForKey:@"libraryID"], self.item[@"path"]);
@@ -181,7 +182,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     float desired = self.boosting ? self.holdRate : self.selectedRate;
     if (fabsf(self.player.rate - desired) > 0.01f) self.player.rate = desired;
 }
-- (void)prepareTransportStream {
+- (void)preparePlayback {
     if (self.closed) return;
     self.preparing = YES;
     self.playButton.enabled = NO;
@@ -197,9 +198,12 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
             s.preparing = NO;
             s.playButton.enabled = YES;
             [s.diagnostics record:@"prepare" values:@{@"http":@(status), @"networkError":@(error.code)}];
-            if (status == 404) { s.statusLabel.text = @"请更新电脑端文件服务，再打开 TS 视频"; return; }
-            if (status != 200 || ![result isKindOfClass:NSDictionary.class]) { s.statusLabel.text = @"准备视频失败，请检查电脑连接后点击播放重试"; return; }
-            if ([result[@"state"] isEqual:@"ready"]) {
+            // Older servers only support TS preflight; retain direct playback for other formats.
+            BOOL legacyDirect = !error && (status == 400 || status == 404) && ![s isTransportStream];
+            if (status == 404 && !legacyDirect) { s.statusLabel.text = @"请更新电脑端文件服务，再打开 TS 视频"; return; }
+            if (!legacyDirect && (status != 200 || ![result isKindOfClass:NSDictionary.class])) { s.statusLabel.text = @"准备视频失败，请检查电脑连接后点击播放重试"; return; }
+            if (legacyDirect || [result[@"state"] isEqual:@"ready"]) {
+                s.indexedPlayback = !legacyDirect && [result[@"indexed"] boolValue];
                 s.prepared = YES;
                 s.subtitleFallback = [result[@"subtitleFallback"] boolValue];
                 s.player.media = [s playbackMedia];
@@ -209,7 +213,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
                 s.preparing = YES;
                 s.playButton.enabled = NO;
                 s.statusLabel.text = [result[@"state"] isEqual:@"waiting"] ? @"电脑正在准备其他视频，请稍候…" : @"正在准备视频\n首次打开可能稍久…";
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [owner prepareTransportStream]; });
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [owner preparePlayback]; });
             } else {
                 s.statusLabel.text = [result[@"error"] isKindOfClass:NSString.class] ? result[@"error"] : @"无法准备该视频";
             }
@@ -409,7 +413,6 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     self.player.drawable = self.videoSurface;
     self.player.scaleFactor = 0;
     self.audioOutput = [[LCAudioOutput alloc] initWithPlayer:self.player];
-    if (![self isTransportStream]) self.player.media = [self playbackMedia];
     // Search results can live below the browser's current folder. Load subtitles beside this video.
     NSString *parent = [self.item[@"path"] stringByDeletingLastPathComponent];
     __weak typeof(self) subtitleOwner = self;
@@ -421,8 +424,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     }];
     [self.subtitleTask resume];
     self.statusLabel.text = @"正在打开视频…";
-    if ([self isTransportStream]) [self prepareTransportStream];
-    else [self.player play];
+    [self preparePlayback];
     __weak typeof(self) weakSelf = self;
     self.timer = [NSTimer timerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *timer) { [weakSelf tick]; }];
     [NSRunLoop.mainRunLoop addTimer:self.timer forMode:NSRunLoopCommonModes];
@@ -692,8 +694,8 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     self.controlsTouched = NSDate.timeIntervalSinceReferenceDate;
     if (self.audioInterruptionActive) { self.resumeAfterInterruption = !self.resumeAfterInterruption; self.wantsPlayback = self.resumeAfterInterruption; return; }
     self.resumeAfterInterruption = NO;
-    if ([self isTransportStream] && !self.prepared) {
-        if (!self.preparing) [self prepareTransportStream];
+    if (!self.prepared) {
+        if (!self.preparing) [self preparePlayback];
         return;
     }
     if (self.stoppingInput) return;
@@ -819,7 +821,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     panel.retry = ^{
         PlayerController *s = owner; if (!s || s.closed) return;
         [s.seekHealth cancel]; s.seekHealth = [LCPlaybackHealth new];
-        if ([s isTransportStream] && !s.prepared) { if (!s.preparing) [s prepareTransportStream]; }
+        if (!s.prepared) { if (!s.preparing) [s preparePlayback]; }
         else [s restartPlaybackAt:s.lastPlayableTime];
     };
     [self presentViewController:[[UINavigationController alloc] initWithRootViewController:panel] animated:YES completion:nil];
@@ -965,8 +967,8 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         self.seekHealth = [LCPlaybackHealth new];
         [self cancelPanSeek];
         [NSUserDefaults.standardUserDefaults removeObjectForKey:self.progressKey];
-        if ([self isTransportStream] && !self.prepared) {
-            if (!self.preparing) [self prepareTransportStream];
+        if (!self.prepared) {
+            if (!self.preparing) [self preparePlayback];
         } else {
             [self restartPlaybackAt:0];
         }

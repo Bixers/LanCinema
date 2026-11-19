@@ -12,7 +12,7 @@ from unittest.mock import patch
 from urllib.parse import urlencode
 
 import imageio_ffmpeg
-from playback_cache import PlaybackCache
+from playback_cache import PlaybackCache, requires_indexed_playback
 from server import MediaServer
 
 
@@ -101,12 +101,37 @@ class PlaybackCacheTests(unittest.TestCase):
         self.assertTrue(self.cache.prepare(self.source)['subtitleFallback'])
 
     def test_authenticated_preparation_and_cached_ranges(self):
+        self.check_preparation_and_ranges('sample.ts')
+
+    def test_ts_named_mp4_prepares_and_serves_seekable_cached_ranges(self):
+        self.check_preparation_and_ranges('download.mp4')
+
+    def test_packet_detection_and_source_replacement(self):
+        path = self.root / 'download.mp4'
+        for stride, prefix in ((188, 0), (192, 4), (204, 0)):
+            packet = b'\x47\x40\x00\x10' + bytes(184)
+            data = ((bytes(prefix) + packet + bytes(stride - prefix - 188)) * 6)
+            path.write_bytes(data)
+            self.assertTrue(requires_indexed_playback(path), stride)
+        # A replacement MP4, short file or isolated sync byte must not reuse a
+        # cached sniff result or trigger remuxing merely because of its suffix.
+        for data in (b'', b'G', b'\x00\x00\x00\x20ftypisom' + bytes(4096), b'G' + bytes(4095)):
+            path.write_bytes(data)
+            self.assertFalse(requires_indexed_playback(path))
+
+    def check_preparation_and_ranges(self, name):
+        if name != self.source.name:
+            target = self.root / name
+            self.source.rename(target)
+            self.source = target
+        original = hashlib.sha256(self.source.read_bytes()).hexdigest()
         server = MediaServer(('127.0.0.1', 0), self.root, 'test-code')
         server.playback_cache.close()
         server.playback_cache = self.cache
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        def request(endpoint, path='sample.ts', token='test-code', prepared=None, method='GET', headers=None):
+        def request(endpoint, path=None, token='test-code', prepared=None, method='GET', headers=None):
+            path = path or name
             query = {'path': path, 'token': token}
             if prepared:
                 query['prepared'] = prepared
@@ -123,6 +148,7 @@ class PlaybackCacheTests(unittest.TestCase):
             status, _, body = request('/api/playback')
             self.assertEqual(status, 200)
             self.assertIn(json.loads(body)['state'], ('preparing', 'ready'))
+            self.assertIs(json.loads(body)['indexed'], True)
             cached = self.ready().read_bytes()
             status, headers, body = request('/media', prepared='1', headers={'Range': 'bytes=31-127'})
             self.assertEqual(status, 206)
@@ -131,6 +157,10 @@ class PlaybackCacheTests(unittest.TestCase):
             self.assertEqual(request('/media', prepared='1', token='wrong')[0], 401)
             status, headers, body = request('/media', prepared='1', method='HEAD')
             self.assertEqual((status, int(headers['Content-Length']), body), (200, len(cached), b''))
+            indexed = self.cache.ready_path(self.source)
+            for second in (39, 12):
+                self.assertEqual(self.frame(indexed, second, True), self.frame(indexed, second, False))
+            self.assertEqual(hashlib.sha256(self.source.read_bytes()).hexdigest(), original)
         finally:
             server.shutdown()
             server.server_close()

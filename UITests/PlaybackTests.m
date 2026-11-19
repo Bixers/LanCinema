@@ -703,10 +703,16 @@
     [self closePlayback];
 }
 - (void)testTransportStreamDurationSeekingAndResume {
+    [self checkTransportStreamDurationSeekingAndResume:@"时间戳偏移测试.ts"];
+}
+- (void)testMisnamedMP4DurationSeekingAndResume {
+    [self checkTransportStreamDurationSeekingAndResume:@"封装识别测试.mp4"];
+}
+- (void)checkTransportStreamDurationSeekingAndResume:(NSString *)filename {
     XCUIElement *folder = self.app.staticTexts[@"演示文件夹"];
     XCTAssertTrue([folder waitForExistenceWithTimeout:20]);
     [folder tap];
-    XCUIElement *movie = self.app.staticTexts[@"时间戳偏移测试.ts"];
+    XCUIElement *movie = self.app.staticTexts[filename];
     XCTAssertTrue([movie waitForExistenceWithTimeout:10]);
     [movie tap];
     XCUIElement *slider = self.app.sliders[@"播放进度"];
