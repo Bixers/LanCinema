@@ -441,12 +441,23 @@
     XCTAssertTrue(self.app.buttons[@"修改时间"].exists);
 }
 - (NSData *)videoPixels {
-    CGImageRef image = self.app.screenshot.image.CGImage;
+    // Use the visible display, and bake UIImage's orientation into the pixels.
+    // XCTest's application capture can retain portrait bounds after a forced
+    // scene rotation; sampling its CGImage alone also discards EXIF orientation.
+    UIImage *shot = XCUIScreen.mainScreen.screenshot.image;
+    UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat];
+    format.scale = 1; format.opaque = YES;
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:shot.size format:format];
+    UIImage *upright = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+        [shot drawInRect:(CGRect){CGPointZero, shot.size}];
+    }];
+    CGImageRef image = upright.CGImage;
     size_t width = CGImageGetWidth(image), height = CGImageGetHeight(image);
     // Both moving fixtures are 16:9. Sample the middle 80% of the
-    // actual fitted picture, excluding the intentional portrait letterboxing.
-    CGFloat pictureHeight = MIN((CGFloat)height, width*9.0/16.0);
-    CGImageRef crop = CGImageCreateWithImageInRect(image, CGRectMake(width*.1, (height-pictureHeight*.8)/2, width*.8, pictureHeight*.8));
+    // fitted picture, excluding bars in both portrait and landscape.
+    CGFloat pictureWidth = MIN((CGFloat)width, height*16.0/9.0);
+    CGFloat pictureHeight = pictureWidth*9.0/16.0;
+    CGImageRef crop = CGImageCreateWithImageInRect(image, CGRectMake((width-pictureWidth*.8)/2, (height-pictureHeight*.8)/2, pictureWidth*.8, pictureHeight*.8));
     NSMutableData *pixels = [NSMutableData dataWithLength:64*64*4];
     CGColorSpaceRef colors = CGColorSpaceCreateDeviceRGB();
     CGContextRef context = CGBitmapContextCreate(pixels.mutableBytes, 64, 64, 8, 64*4, colors, (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
