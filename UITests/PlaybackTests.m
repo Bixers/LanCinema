@@ -51,6 +51,101 @@
     if (self.app.buttons[@"暂停"].isHittable) [self.app.buttons[@"暂停"] tap];
     [self.app.buttons[@"关闭播放器"] tap];
 }
+- (void)waitForLandscape:(BOOL)landscape {
+    NSPredicate *orientation = [NSPredicate predicateWithBlock:^BOOL(XCUIElement *window, NSDictionary *bindings) {
+        CGRect frame = window.frame;
+        return window.exists && frame.size.width > 0 && (landscape ? frame.size.width > frame.size.height : frame.size.height > frame.size.width);
+    }];
+    [self expectationForPredicate:orientation evaluatedWithObject:self.app.windows.firstMatch handler:nil];
+    [self waitForExpectationsWithTimeout:10 handler:nil];
+}
+- (void)setAutomaticLandscape:(BOOL)enabled {
+    XCTAssertTrue([self.app.buttons[@"设置"] waitForExistenceWithTimeout:20]);
+    [self.app.buttons[@"设置"] tap];
+    XCUIElement *toggle = self.app.switches[@"automaticPlaybackLandscape"];
+    XCTAssertTrue([toggle waitForExistenceWithTimeout:5]);
+    if ([toggle.value boolValue] != enabled) [toggle tap];
+    XCTAssertEqual([toggle.value boolValue], enabled);
+    [self.app.buttons[@"完成"] tap];
+}
+- (void)testAutomaticPlaybackOrientationAndReturn {
+    XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationLandscapeLeft;
+    [self waitForLandscape:NO];
+    [self capture:@"orientation-library-portrait"];
+    [self.app.buttons[@"设置"] tap];
+    XCTAssertTrue([self.app.switches[@"automaticPlaybackLandscape"].value boolValue]);
+    [self waitForLandscape:NO];
+    [self capture:@"orientation-settings-default"];
+    [self.app.buttons[@"完成"] tap];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationPortrait;
+    [self openTransportStream];
+    [self waitForLandscape:YES];
+    XCTAssertLessThanOrEqual(self.app.otherElements[@"playerFooter"].frame.size.height, 60);
+    [self capture:@"orientation-player-auto-landscape"];
+    [self.app.sliders[@"播放进度"] adjustToNormalizedSliderPosition:.3];
+    [self waitForPlaybackSecondsFrom:16 to:30];
+    [self assertVideoFramesAdvance:@"orientation-seek-frames"];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationLandscapeRight;
+    [self closePlayback];
+    [self waitForLandscape:NO];
+    [self capture:@"orientation-folder-return-portrait"];
+    [self.app.buttons[@"continueWatching"] tap];
+    [self waitForLandscape:NO];
+    [self.app.staticTexts[@"时间戳偏移测试.ts"] tap];
+    [self waitForPlaybackSecondsFrom:16 to:45];
+    [self waitForLandscape:YES];
+    [XCUIDevice.sharedDevice pressButton:XCUIDeviceButtonHome];
+    [self.app activate];
+    [self waitForLandscape:YES];
+    [self closePlayback];
+    [self waitForLandscape:NO];
+    [self capture:@"orientation-history-return-portrait"];
+}
+- (void)testAutomaticPlaybackOrientationOffPersists {
+    [self setAutomaticLandscape:NO];
+    [self.app terminate]; self.app.launchArguments = @[@"--ui-test-keep-controls"]; [self.app launch];
+    XCTAssertTrue([self.app.buttons[@"设置"] waitForExistenceWithTimeout:20]);
+    [self.app.buttons[@"设置"] tap];
+    XCTAssertFalse([self.app.switches[@"automaticPlaybackLandscape"].value boolValue]);
+    [self capture:@"orientation-settings-off"];
+    [self.app.buttons[@"完成"] tap];
+    [self openTransportStream];
+    [self waitForLandscape:NO];
+    [self capture:@"orientation-player-manual-portrait"];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationLandscapeLeft;
+    [self waitForLandscape:YES];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationPortrait;
+    [self waitForLandscape:NO];
+    [self closePlayback];
+    [self setAutomaticLandscape:YES];
+    [self.app.staticTexts[@"时间戳偏移测试.ts"] tap];
+    [self waitForPlaybackSecondsFrom:1 to:50];
+    [self waitForLandscape:YES];
+    [self closePlayback];
+    [self waitForLandscape:NO];
+}
+- (void)testAutomaticPlaybackOrientationSettingsAccessible {
+    [self.app terminate]; self.app.launchArguments = @[@"--ui-test-dark", @"--ui-test-large"]; [self.app launch];
+    XCTAssertTrue([self.app.buttons[@"设置"] waitForExistenceWithTimeout:20]);
+    [self.app.buttons[@"设置"] tap];
+    XCUIElement *toggle = self.app.switches[@"automaticPlaybackLandscape"];
+    XCTAssertTrue([toggle waitForExistenceWithTimeout:5]);
+    XCTAssertTrue(toggle.isHittable);
+    XCTAssertEqualObjects(toggle.label, @"播放时自动横屏");
+    [self capture:@"orientation-settings-dark-large"];
+    [toggle tap];
+    XCTAssertFalse([toggle.value boolValue]);
+    [toggle tap];
+    XCUIDevice.sharedDevice.orientation = UIDeviceOrientationLandscapeLeft;
+    [self waitForLandscape:NO];
+    [self.app.tables.firstMatch swipeUp];
+    XCTAssertTrue(self.app.staticTexts[@"连接电脑"].isHittable);
+    [self capture:@"orientation-settings-dark-large-connection"];
+    [self.app.staticTexts[@"连接电脑"] tap];
+    XCTAssertTrue([self.app.buttons[@"密码连接"] waitForExistenceWithTimeout:5]);
+    [self waitForLandscape:NO];
+}
 - (void)testContinueWatchingPersistenceAndCompletion {
     XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
     [self.app.buttons[@"continueWatching"] tap];
@@ -292,6 +387,7 @@
     XCTAssertTrue(recognized, @"Rendered subtitle must contain readable Chinese, not missing-glyph squares");
 }
 - (void)testSmartCropKeepsSubtitlesVisible {
+    [self setAutomaticLandscape:NO];
     XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
     [self.app.staticTexts[@"演示文件夹"] tap];
     [self.app.staticTexts[@"偏心黑边字幕测试.mkv"] tap];
@@ -587,6 +683,7 @@
     XCTAssertTrue(hasProgress, @"%@", spoken);
 }
 - (void)testCompactLandscapeControlsAndRotation {
+    [self setAutomaticLandscape:NO];
     [self openTransportStream];
     [self.app.buttons[@"暂停"] tap];
     CGFloat portraitHeight = self.app.otherElements[@"playerFooter"].frame.size.height;
@@ -820,7 +917,8 @@
 }
 - (void)testConnectionSettingsAndPersistence {
     XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
-    [self.app.buttons[@"电脑连接设置"] tap];
+    [self.app.buttons[@"设置"] tap];
+    [self.app.staticTexts[@"连接电脑"] tap];
     XCTAssertTrue([self.app.buttons[@"密码连接"] waitForExistenceWithTimeout:5]);
     [self capture:@"connection-password"];
     [self.app.buttons[@"扫码连接"] tap];
@@ -861,6 +959,7 @@
     XCTAssertTrue(self.app.buttons[@"播放"].exists, @"Changing display mode must keep playback paused");
 }
 - (void)testAutomaticFillAndSavedDisplayMode {
+    [self setAutomaticLandscape:NO];
     XCUIElement *movie = self.app.staticTexts[@"黑边竖屏测试.mkv"];
     XCTAssertTrue([movie waitForExistenceWithTimeout:20]);
     [movie tap];

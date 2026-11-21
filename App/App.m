@@ -12,6 +12,8 @@
 #import "UserSync.h"
 #import "PlaybackHealth.h"
 #import "PlaybackPanels.h"
+#import "PlaybackOrientation.h"
+#import "Settings.h"
 
 // Public libvlc frame-step API; use the same owning-player bridge as audio.
 extern void libvlc_media_player_next_frame(void *);
@@ -135,6 +137,17 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 @end
 
 @implementation PlayerController
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations {
+    return LCAutomaticPlaybackLandscape() ? UIInterfaceOrientationMaskLandscape : UIInterfaceOrientationMaskAllButUpsideDown;
+}
+- (UIInterfaceOrientation)preferredInterfaceOrientationForPresentation {
+    if (!LCAutomaticPlaybackLandscape()) return UIInterfaceOrientationPortrait;
+    return UIDevice.currentDevice.orientation == UIDeviceOrientationLandscapeRight ? UIInterfaceOrientationLandscapeLeft : UIInterfaceOrientationLandscapeRight;
+}
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    if (!self.closed && LCAutomaticPlaybackLandscape()) LCRequestOrientation(self, UIInterfaceOrientationMaskLandscape);
+}
 - (BOOL)isTransportStream { return self.indexedPlayback || [@[@"ts", @"mts", @"m2ts"] containsObject:[self.item[@"path"] pathExtension].lowercaseString]; }
 - (NSString *)progressKey {
     return LCProgressKey(self.historyHost ?: [NSUserDefaults.standardUserDefaults stringForKey:HostKey],
@@ -1061,8 +1074,9 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     }
 }
 - (void)closePlayer {
+    UIViewController *presenter = self.presentingViewController;
     [self stopPlayer];
-    [self dismissViewControllerAnimated:YES completion:nil];
+    [self dismissViewControllerAnimated:YES completion:^{ LCRequestOrientation(presenter, UIInterfaceOrientationMaskPortrait); }];
 }
 - (void)stopPlayer {
     if (self.closed) return;
@@ -1134,8 +1148,8 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     self.tableView.backgroundColor = UIColor.systemBackgroundColor;
     self.tableView.separatorInset = UIEdgeInsetsMake(0, 16, 0, 16);
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
-    UIBarButtonItem *connection = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"network"] style:UIBarButtonItemStylePlain target:self action:@selector(settings)];
-    connection.accessibilityLabel = @"电脑连接设置";
+    UIBarButtonItem *connection = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"gearshape"] style:UIBarButtonItemStylePlain target:self action:@selector(settings)];
+    connection.accessibilityLabel = @"设置";
     self.sortButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.up.arrow.down"] menu:nil];
     self.sortButton.accessibilityLabel = @"排序";
     self.viewButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"square.grid.2x2"] menu:nil];
@@ -1625,7 +1639,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     }
 }
 - (void)settings {
-    ConnectionController *connection = [ConnectionController new];
+    LCSettingsController *connection = [LCSettingsController new];
     __weak typeof(self) weakSelf = self;
     connection.onConnected = ^{
         BrowserController *root = (BrowserController *)weakSelf.navigationController.viewControllers.firstObject;
@@ -1634,7 +1648,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         root.items = @[]; root.visibleItems = @[]; root.itemsLoaded = NO;
         [root.tableView reloadData]; [root loadFolder];
     };
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:connection];
+    UINavigationController *nav = [[LCPortraitNavigationController alloc] initWithRootViewController:connection];
     [self presentViewController:nav animated:YES completion:nil];
 }
 - (void)dealloc { [self.task cancel]; [self.searchTimer invalidate]; }
@@ -1648,7 +1662,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     if (![scene isKindOfClass:UIWindowScene.class]) return;
     self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
     BrowserController *browser = [[BrowserController alloc] initWithFolder:@"" title:@"局域影院"];
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:browser];
+    UINavigationController *nav = [[LCPortraitNavigationController alloc] initWithRootViewController:browser];
     nav.navigationBar.prefersLargeTitles = YES;
     nav.view.tintColor = UIColor.systemTealColor;
     self.window.rootViewController = nav;
@@ -1666,6 +1680,17 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 @interface AppDelegate : UIResponder <UIApplicationDelegate>
 @end
 @implementation AppDelegate
+- (UIInterfaceOrientationMask)application:(UIApplication *)application supportedInterfaceOrientationsForWindow:(UIWindow *)window {
+    // A full-screen player (including its track/diagnostic sheets) owns rotation.
+    // All library, history, favorites, connection and settings screens are portrait.
+    UIViewController *controller = window.rootViewController;
+    while (controller) {
+        if ([controller isKindOfClass:PlayerController.class] && !controller.isBeingDismissed && !((PlayerController *)controller).closed)
+            return controller.supportedInterfaceOrientations;
+        controller = controller.presentedViewController;
+    }
+    return UIInterfaceOrientationMaskPortrait;
+}
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
 #if DEBUG
     if ([NSProcessInfo.processInfo.arguments containsObject:@"--ui-test"]) {
