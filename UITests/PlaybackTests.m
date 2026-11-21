@@ -447,11 +447,15 @@
     // XCTest's application capture can retain portrait bounds after a forced
     // scene rotation; sampling its CGImage alone also discards EXIF orientation.
     UIImage *shot = XCUIScreen.mainScreen.screenshot.image;
+    CGSize size = CGSizeMake(CGImageGetWidth(shot.CGImage), CGImageGetHeight(shot.CGImage));
+    if (shot.imageOrientation == UIImageOrientationLeft || shot.imageOrientation == UIImageOrientationRight ||
+        shot.imageOrientation == UIImageOrientationLeftMirrored || shot.imageOrientation == UIImageOrientationRightMirrored)
+        size = CGSizeMake(size.height, size.width);
     UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat];
     format.scale = 1; format.opaque = YES;
-    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:shot.size format:format];
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:size format:format];
     UIImage *upright = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
-        [shot drawInRect:(CGRect){CGPointZero, shot.size}];
+        [shot drawInRect:(CGRect){CGPointZero, size}];
     }];
     CGImageRef image = upright.CGImage;
     size_t width = CGImageGetWidth(image), height = CGImageGetHeight(image);
