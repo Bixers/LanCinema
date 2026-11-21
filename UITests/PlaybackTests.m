@@ -46,10 +46,20 @@
     if (!close.exists || !close.isHittable) [center tap];
 }
 - (void)closePlayback {
+    // XCTest's idle callback can arrive before the rotation compositor and
+    // accessibility hit-test coordinates settle (including a 180-degree flip).
+    [self waitForRotationCompositor];
     [self showPlayerControls];
     // Freeze the hide timer before the slower XCTest snapshot/tap sequence.
     if (self.app.buttons[@"暂停"].isHittable) [self.app.buttons[@"暂停"] tap];
     [self.app.buttons[@"关闭播放器"] tap];
+    [self waitForLandscape:NO];
+    [self waitForRotationCompositor];
+}
+- (void)waitForRotationCompositor {
+    XCTestExpectation *settled = [self expectationWithDescription:@"Rotation hit-test geometry settled"];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2*NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [settled fulfill]; });
+    [self waitForExpectationsWithTimeout:4 handler:nil];
 }
 - (void)waitForLandscape:(BOOL)landscape {
     NSPredicate *orientation = [NSPredicate predicateWithBlock:^BOOL(XCUIElement *window, NSDictionary *bindings) {

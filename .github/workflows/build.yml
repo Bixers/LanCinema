@@ -26,6 +26,10 @@ on:
         description: 'Validate player-only rotation, saved setting, native settings and playback'
         type: boolean
         default: false
+      orientation_recheck:
+        description: 'Recheck automatic orientation return and favorites after rotation settles'
+        type: boolean
+        default: false
       views_only:
         description: 'Validate browser navigation, accessibility and native appearances'
         type: boolean
@@ -189,7 +193,12 @@ jobs:
           PY
           set -o pipefail
           TEST_SELECTION=()
-          if [ '${{ inputs.orientation }}' = 'true' ]; then
+          if [ '${{ inputs.orientation_recheck }}' = 'true' ]; then
+            TEST_SELECTION=(
+              '-only-testing:LanCinemaUITests/PlaybackTests/testAutomaticPlaybackOrientationAndReturn'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testFavoritesDetailsPersistenceAndOpen'
+            )
+          elif [ '${{ inputs.orientation }}' = 'true' ]; then
             TEST_SELECTION=(
               '-only-testing:LanCinemaUITests/PlaybackTests/testAutomaticPlaybackOrientationAndReturn'
               '-only-testing:LanCinemaUITests/PlaybackTests/testAutomaticPlaybackOrientationOffPersists'
