@@ -136,6 +136,9 @@
     [self waitForLandscape:NO];
 }
 - (void)testAutomaticPlaybackOrientationSettingsAccessible {
+    XCTAssertTrue([self.app.buttons[@"设置"] waitForExistenceWithTimeout:20]);
+    [self.app.buttons[@"设置"] tap];
+    [self capture:@"orientation-settings-default"];
     [self.app terminate]; self.app.launchArguments = @[@"--ui-test-dark", @"--ui-test-large"]; [self.app launch];
     XCTAssertTrue([self.app.buttons[@"设置"] waitForExistenceWithTimeout:20]);
     [self.app.buttons[@"设置"] tap];
@@ -145,6 +148,7 @@
     XCTAssertEqualObjects(toggle.label, @"播放时自动横屏");
     XCUIElement *row = self.app.tables.firstMatch.cells.firstMatch;
     XCTAssertGreaterThan(row.frame.size.height, 110, @"Accessibility font must reach the presented settings screen and stack the switch below its title");
+    XCTAssertGreaterThan(self.app.staticTexts[@"playbackOrientationExplanation"].frame.size.height, 130, @"The explanatory footer must grow and wrap with accessibility text size");
     [self capture:@"orientation-settings-dark-large"];
     [toggle tap];
     XCTAssertFalse([toggle.value boolValue]);

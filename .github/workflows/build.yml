@@ -30,6 +30,10 @@ on:
         description: 'Recheck automatic orientation return and favorites after rotation settles'
         type: boolean
         default: false
+      settings_accessibility:
+        description: 'Validate normal and accessibility-size orientation settings'
+        type: boolean
+        default: false
       views_only:
         description: 'Validate browser navigation, accessibility and native appearances'
         type: boolean
@@ -193,7 +197,9 @@ jobs:
           PY
           set -o pipefail
           TEST_SELECTION=()
-          if [ '${{ inputs.orientation_recheck }}' = 'true' ]; then
+          if [ '${{ inputs.settings_accessibility }}' = 'true' ]; then
+            TEST_SELECTION=('-only-testing:LanCinemaUITests/PlaybackTests/testAutomaticPlaybackOrientationSettingsAccessible')
+          elif [ '${{ inputs.orientation_recheck }}' = 'true' ]; then
             TEST_SELECTION=(
               '-only-testing:LanCinemaUITests/PlaybackTests/testAutomaticPlaybackOrientationAndReturn'
               '-only-testing:LanCinemaUITests/PlaybackTests/testFavoritesDetailsPersistenceAndOpen'
