@@ -1649,6 +1649,9 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         [root.tableView reloadData]; [root loadFolder];
     };
     UINavigationController *nav = [[LCPortraitNavigationController alloc] initWithRootViewController:connection];
+    nav.view.tintColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits) {
+        return traits.userInterfaceStyle == UIUserInterfaceStyleDark ? UIColor.systemTealColor : [UIColor colorWithRed:0 green:.4 blue:.42 alpha:1];
+    }];
     [self presentViewController:nav animated:YES completion:nil];
 }
 - (void)dealloc { [self.task cancel]; [self.searchTimer invalidate]; }
@@ -1670,7 +1673,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     NSArray *arguments = NSProcessInfo.processInfo.arguments;
     if ([arguments containsObject:@"--ui-test-dark"]) self.window.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     if ([arguments containsObject:@"--ui-test-large"]) {
-        if (@available(iOS 17.0, *)) nav.traitOverrides.preferredContentSizeCategory = UIContentSizeCategoryAccessibilityExtraExtraExtraLarge;
+        if (@available(iOS 17.0, *)) self.window.traitOverrides.preferredContentSizeCategory = UIContentSizeCategoryAccessibilityExtraExtraExtraLarge;
     }
 #endif
     [self.window makeKeyAndVisible];

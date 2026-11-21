@@ -133,6 +133,8 @@
     XCTAssertTrue([toggle waitForExistenceWithTimeout:5]);
     XCTAssertTrue(toggle.isHittable);
     XCTAssertEqualObjects(toggle.label, @"播放时自动横屏");
+    XCUIElement *row = self.app.tables.firstMatch.cells.firstMatch;
+    XCTAssertGreaterThan(row.frame.size.height, 110, @"Accessibility font must reach the presented settings screen and stack the switch below its title");
     [self capture:@"orientation-settings-dark-large"];
     [toggle tap];
     XCTAssertFalse([toggle.value boolValue]);
