@@ -134,19 +134,19 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 @property(nonatomic) BOOL recoveryFailed;
 @property(nonatomic) double lastFrameAt;
 @property(nonatomic) double lastSavedPlayableTime;
+@property(nonatomic) UIInterfaceOrientationMask videoOrientationMask;
 @end
 
 @implementation PlayerController
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations {
-    return LCAutomaticPlaybackLandscape() ? UIInterfaceOrientationMaskLandscape : UIInterfaceOrientationMaskAllButUpsideDown;
+    return self.videoOrientationMask ?: UIInterfaceOrientationMaskPortrait;
 }
 - (UIInterfaceOrientation)preferredInterfaceOrientationForPresentation {
-    if (!LCAutomaticPlaybackLandscape()) return UIInterfaceOrientationPortrait;
-    return UIDevice.currentDevice.orientation == UIDeviceOrientationLandscapeRight ? UIInterfaceOrientationLandscapeLeft : UIInterfaceOrientationLandscapeRight;
+    return UIInterfaceOrientationPortrait;
 }
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
-    if (!self.closed && LCAutomaticPlaybackLandscape()) LCRequestOrientation(self, UIInterfaceOrientationMaskLandscape);
+    if (!self.closed) LCRequestOrientation(self, self.supportedInterfaceOrientations);
 }
 - (BOOL)isTransportStream { return self.indexedPlayback || [@[@"ts", @"mts", @"m2ts"] containsObject:[self.item[@"path"] pathExtension].lowercaseString]; }
 - (NSString *)progressKey {
@@ -547,6 +547,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     CGSize video = self.player.videoSize;
     double sar = 1;
     BOOL upright = YES;
+    BOOL transposed = NO;
     for (NSDictionary *track in self.player.media.tracksInformation) {
         if ([track[VLCMediaTracksInformationType] isEqual:VLCMediaTracksInformationTypeVideo]) {
             double width = [track[VLCMediaTracksInformationVideoWidth] doubleValue];
@@ -555,9 +556,19 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
             double numerator = [track[VLCMediaTracksInformationSourceAspectRatio] doubleValue];
             double denominator = [track[VLCMediaTracksInformationSourceAspectRatioDenominator] doubleValue];
             if (numerator > 0 && denominator > 0) sar = numerator/denominator;
-            upright = [track[VLCMediaTracksInformationVideoOrientation] integerValue] == VLCMediaOrientationTopLeft;
+            VLCMediaOrientation orientation = [track[VLCMediaTracksInformationVideoOrientation] integerValue];
+            upright = orientation == VLCMediaOrientationTopLeft;
+            transposed = orientation == VLCMediaOrientationLeftTop || orientation == VLCMediaOrientationLeftBottom ||
+                         orientation == VLCMediaOrientationRightTop || orientation == VLCMediaOrientationRightBottom;
             break;
         }
+    }
+    // Classify the original displayed picture before any crop-to-fill operation.
+    // Rotation only changes UIKit geometry; it never reopens the decoder/audio.
+    UIInterfaceOrientationMask mask = LCPlaybackOrientationMask(video, sar, transposed, LCAutomaticPlaybackLandscape());
+    if (self.videoOrientationMask != mask) {
+        self.videoOrientationMask = mask;
+        LCRequestOrientation(self, mask);
     }
     NSString *geometry = LCVideoCropGeometry(mode, video, self.canvas.bounds.size, self.detectedCrop, sar, upright);
     if (![geometry isEqualToString:self.appliedGeometry]) {

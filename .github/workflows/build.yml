@@ -26,6 +26,10 @@ on:
         description: 'Validate player-only rotation, saved setting, native settings and playback'
         type: boolean
         default: false
+      portrait:
+        description: 'Validate portrait media lock, rotation metadata, settings and landscape regression'
+        type: boolean
+        default: false
       orientation_recheck:
         description: 'Recheck automatic orientation return and favorites after rotation settles'
         type: boolean
@@ -197,7 +201,16 @@ jobs:
           PY
           set -o pipefail
           TEST_SELECTION=()
-          if [ '${{ inputs.settings_accessibility }}' = 'true' ]; then
+          if [ '${{ inputs.portrait }}' = 'true' ]; then
+            TEST_SELECTION=(
+              '-only-testing:LanCinemaUITests/PlaybackTests/testPortraitVideoIgnoresDeviceRotation'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testRotatedPortraitVideoIgnoresDeviceRotation'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testAutomaticPlaybackOrientationAndReturn'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testAutomaticPlaybackOrientationOffPersists'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testAutomaticPlaybackOrientationSettingsAccessible'
+              '-only-testing:LanCinemaTests'
+            )
+          elif [ '${{ inputs.settings_accessibility }}' = 'true' ]; then
             TEST_SELECTION=('-only-testing:LanCinemaUITests/PlaybackTests/testAutomaticPlaybackOrientationSettingsAccessible')
           elif [ '${{ inputs.orientation_recheck }}' = 'true' ]; then
             TEST_SELECTION=(

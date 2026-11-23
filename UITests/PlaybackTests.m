@@ -3,6 +3,7 @@
 
 @interface PlaybackTests : XCTestCase
 @property(nonatomic, strong) XCUIApplication *app;
+@property(nonatomic) double fixtureAspectRatio;
 @end
 
 @implementation PlaybackTests
@@ -161,6 +162,39 @@
     [self.app.staticTexts[@"连接电脑"] tap];
     XCTAssertTrue([self.app.buttons[@"密码连接"] waitForExistenceWithTimeout:5]);
     [self waitForLandscape:NO];
+}
+- (void)checkPortraitMovie:(NSString *)name capture:(NSString *)capture {
+    self.fixtureAspectRatio = 9.0/16.0;
+    XCTAssertTrue([self.app.staticTexts[@"竖屏方向测试"] waitForExistenceWithTimeout:20]);
+    [self.app.staticTexts[@"竖屏方向测试"] tap];
+    for (NSNumber *automatic in @[@YES, @NO]) {
+        [self setAutomaticLandscape:automatic.boolValue];
+        XCUIDevice.sharedDevice.orientation = UIDeviceOrientationLandscapeLeft;
+        [self waitForRotationCompositor];
+        [self.app.staticTexts[name] tap];
+        [self waitForPlaybackSecondsFrom:1 to:110];
+        [self waitForLandscape:NO];
+        [self waitForRotationCompositor];
+        [self waitForLandscape:NO];
+        [self capture:[capture stringByAppendingString:automatic.boolValue ? @"-on" : @"-off"]];
+        XCUIDevice.sharedDevice.orientation = UIDeviceOrientationLandscapeRight;
+        [self waitForRotationCompositor];
+        [self waitForLandscape:NO];
+        [self.app.sliders[@"播放进度"] adjustToNormalizedSliderPosition:.3];
+        [self waitForPlaybackSecondsFrom:28 to:48];
+        [self assertVideoFramesAdvance:[capture stringByAppendingString:@"-seek"]];
+        [XCUIDevice.sharedDevice pressButton:XCUIDeviceButtonHome];
+        [self.app activate];
+        [self waitForRotationCompositor];
+        [self waitForLandscape:NO];
+        [self closePlayback];
+    }
+}
+- (void)testPortraitVideoIgnoresDeviceRotation {
+    [self checkPortraitMovie:@"竖屏视频.mp4" capture:@"portrait-native"];
+}
+- (void)testRotatedPortraitVideoIgnoresDeviceRotation {
+    [self checkPortraitMovie:@"旋转标记竖屏.mp4" capture:@"portrait-rotated"];
 }
 - (void)testContinueWatchingPersistenceAndCompletion {
     XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
@@ -475,8 +509,9 @@
     size_t width = CGImageGetWidth(image), height = CGImageGetHeight(image);
     // Both moving fixtures are 16:9. Sample the middle 80% of the
     // fitted picture, excluding bars in both portrait and landscape.
-    CGFloat pictureWidth = MIN((CGFloat)width, height*16.0/9.0);
-    CGFloat pictureHeight = pictureWidth*9.0/16.0;
+    double aspect = self.fixtureAspectRatio > 0 ? self.fixtureAspectRatio : 16.0/9.0;
+    CGFloat pictureWidth = MIN((CGFloat)width, height*aspect);
+    CGFloat pictureHeight = pictureWidth/aspect;
     CGImageRef crop = CGImageCreateWithImageInRect(image, CGRectMake((width-pictureWidth*.8)/2, (height-pictureHeight*.8)/2, pictureWidth*.8, pictureHeight*.8));
     NSMutableData *pixels = [NSMutableData dataWithLength:64*64*4];
     CGColorSpaceRef colors = CGColorSpaceCreateDeviceRGB();

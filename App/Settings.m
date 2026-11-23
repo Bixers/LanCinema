@@ -20,7 +20,7 @@
     if (section != 0) return nil;
     UITableViewHeaderFooterView *footer = [[UITableViewHeaderFooterView alloc] initWithReuseIdentifier:nil];
     UILabel *label = [UILabel new];
-    label.text = @"开启后，进入视频自动横屏；关闭后，播放器跟随手机方向。退出视频恢复竖屏。设置自动保存在此手机。";
+    label.text = @"竖屏视频始终保持竖屏。横屏视频：开启后自动横屏，关闭后跟随手机方向。退出视频恢复竖屏。设置自动保存在此手机。";
     label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote compatibleWithTraitCollection:self.traitCollection];
     label.adjustsFontForContentSizeCategory = YES;
     label.numberOfLines = 0;

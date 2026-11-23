@@ -1,0 +1,1 @@
+Synthetic FFmpeg testsrc2, 180x320 at 15fps, 120 seconds, 440Hz sine. No user media. Second MP4 encodes 320x180 with 90-degree display matrix, rendered portrait. H264/AAC. Generated for orientation regression.
