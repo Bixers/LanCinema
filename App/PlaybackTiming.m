@@ -35,10 +35,10 @@ void LCSetAudioDelayMilliseconds(NSString *scope, NSInteger milliseconds) {
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section == 0 ? 1 : 3; }
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+- (NSString *)sectionHeader:(NSInteger)section {
     return section == 0 ? @"同步优先" : @"当前视频微调";
 }
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+- (NSString *)sectionFooter:(NSInteger)section {
     return section == 0 ? @"声音和画面由同一播放器时钟调度。进入视频或拖动后允许更多缓冲。" : @"只在仍有固定偏差时微调。每次 50 毫秒，范围 ±2 秒；按当前视频保存在此手机。切换耳机或扬声器后可能需要重新校准。";
 }
 - (UIView *)sectionText:(NSString *)text header:(BOOL)header section:(NSInteger)section {
@@ -61,10 +61,10 @@ void LCSetAudioDelayMilliseconds(NSString *scope, NSInteger milliseconds) {
     return view;
 }
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
-    return [self sectionText:[self tableView:tableView titleForHeaderInSection:section] header:YES section:section];
+    return [self sectionText:[self sectionHeader:section] header:YES section:section];
 }
 - (UIView *)tableView:(UITableView *)tableView viewForFooterInSection:(NSInteger)section {
-    return [self sectionText:[self tableView:tableView titleForFooterInSection:section] header:NO section:section];
+    return [self sectionText:[self sectionFooter:section] header:NO section:section];
 }
 - (void)traitCollectionDidChange:(UITraitCollection *)previous {
     [super traitCollectionDidChange:previous];
