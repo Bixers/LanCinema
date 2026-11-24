@@ -692,8 +692,10 @@
     [[self.app.navigationBars.buttons elementBoundByIndex:0] tap];
     [self setAutomaticLandscape:NO]; [self openTransportStream]; [self openAudioCalibration];
     [self capture:@"audio-calibration-dark-large-top"];
-    [self.app.tables.firstMatch swipeUp];
+    for (NSInteger swipe=0; swipe<6 && !self.app.cells[@"resetAudioDelay"].isHittable; swipe++) [self.app.tables.firstMatch swipeUp];
     XCTAssertTrue(self.app.cells[@"resetAudioDelay"].isHittable);
+    [self.app.tables.firstMatch swipeUp];
+    XCTAssertTrue(self.app.staticTexts[@"audioCalibrationFooter1"].isHittable);
     [self capture:@"audio-calibration-dark-large-bottom"];
     [self.app.buttons[@"完成"] tap]; [self closePlayback];
 }

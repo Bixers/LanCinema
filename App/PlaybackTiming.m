@@ -26,9 +26,12 @@ void LCSetAudioDelayMilliseconds(NSString *scope, NSInteger milliseconds) {
     self.title = @"音画校准";
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 64;
+    self.tableView.sectionHeaderHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedSectionHeaderHeight = 44;
     self.tableView.sectionFooterHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedSectionFooterHeight = 100;
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"完成" style:UIBarButtonItemStyleDone target:self action:@selector(done)];
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"完成" style:UIBarButtonItemStylePlain target:self action:@selector(done)];
+    self.navigationItem.rightBarButtonItem.tintColor = UIColor.labelColor;
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section == 0 ? 1 : 3; }
@@ -37,6 +40,35 @@ void LCSetAudioDelayMilliseconds(NSString *scope, NSInteger milliseconds) {
 }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     return section == 0 ? @"声音和画面由同一播放器时钟调度。进入视频或拖动后允许更多缓冲。" : @"只在仍有固定偏差时微调。每次 50 毫秒，范围 ±2 秒；按当前视频保存在此手机。切换耳机或扬声器后可能需要重新校准。";
+}
+- (UIView *)sectionText:(NSString *)text header:(BOOL)header section:(NSInteger)section {
+    UITableViewHeaderFooterView *view = [[UITableViewHeaderFooterView alloc] initWithReuseIdentifier:nil];
+    UILabel *label = [UILabel new];
+    label.text = text;
+    label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote compatibleWithTraitCollection:self.traitCollection];
+    label.adjustsFontForContentSizeCategory = YES;
+    label.numberOfLines = 0;
+    label.textColor = UIColor.labelColor;
+    label.accessibilityIdentifier = [NSString stringWithFormat:@"audioCalibration%@%ld", header ? @"Header" : @"Footer", (long)section];
+    if (header) label.accessibilityTraits |= UIAccessibilityTraitHeader;
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    [view.contentView addSubview:label];
+    [NSLayoutConstraint activateConstraints:@[
+        [label.leadingAnchor constraintEqualToAnchor:view.contentView.layoutMarginsGuide.leadingAnchor],
+        [label.trailingAnchor constraintEqualToAnchor:view.contentView.layoutMarginsGuide.trailingAnchor],
+        [label.topAnchor constraintEqualToAnchor:view.contentView.topAnchor constant:header ? 16 : 8],
+        [label.bottomAnchor constraintEqualToAnchor:view.contentView.bottomAnchor constant:-8]]];
+    return view;
+}
+- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
+    return [self sectionText:[self tableView:tableView titleForHeaderInSection:section] header:YES section:section];
+}
+- (UIView *)tableView:(UITableView *)tableView viewForFooterInSection:(NSInteger)section {
+    return [self sectionText:[self tableView:tableView titleForFooterInSection:section] header:NO section:section];
+}
+- (void)traitCollectionDidChange:(UITraitCollection *)previous {
+    [super traitCollectionDidChange:previous];
+    if (![previous.preferredContentSizeCategory isEqual:self.traitCollection.preferredContentSizeCategory]) [self.tableView reloadData];
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
