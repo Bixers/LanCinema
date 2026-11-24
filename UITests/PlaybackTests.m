@@ -630,6 +630,10 @@
     [self.app.buttons[@"完成"] tap]; [self closePlayback];
 }
 - (void)testAllVideosSearchHistoryFolderAndPreview {
+    // This end-to-end journey includes decoded-frame captures, a folder menu,
+    // and multiple player transitions. Hosted AX snapshots can take >120 s;
+    // keep each operation's own bounded wait and allow the complete journey.
+    self.executionTimeAllowance = 180;
     XCTAssertTrue([self.app.buttons[@"allVideos"] waitForExistenceWithTimeout:20]); [self.app.buttons[@"allVideos"] tap];
     XCTAssertTrue([self.app.tables[@"allVideosList"].cells.firstMatch waitForExistenceWithTimeout:20]);
     [self waitForMonochromeFixtureCover:self.app.tables[@"allVideosList"].cells.firstMatch];
