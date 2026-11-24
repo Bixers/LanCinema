@@ -27,6 +27,7 @@ static NSString *const HostKey = @"computerHost";
 static NSString *const TokenKey = @"computerAccessCode";
 static NSString *const RateKey = @"playbackRate";
 static NSString *const HoldKey = @"holdPlaybackRate";
+static NSUInteger PlaybackSessionGeneration;
 
 static NSURL *ServiceURL(NSString *endpoint, NSString *path) {
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
@@ -145,6 +146,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 @property(nonatomic, copy) void (^nextPreview)(void);
 @property(nonatomic, copy) void (^stopped)(void);
 @property(nonatomic) NSInteger preparationGeneration;
+@property(nonatomic) NSUInteger audioSessionGeneration;
 @end
 
 @implementation PlayerController
@@ -225,7 +227,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
             [s.diagnostics record:@"prepare" values:@{@"http":@(status), @"networkError":@(error.code)}];
             // Older servers only support TS preflight; retain direct playback for other formats.
             BOOL legacyDirect = !s.previewMode && !error && (status == 400 || status == 404) && ![s isTransportStream];
-            if (status == 404 && s.previewMode) { s.statusLabel.text = @"请更新电脑端后使用随机试看\n也可直接看全片"; return; }
+            if (status == 404 && s.previewMode) { s.statusLabel.text = @"视频已移动，或电脑端尚不支持试看\n可换一部，或更新电脑端后重试"; return; }
             if (status == 404 && !legacyDirect) { s.statusLabel.text = @"请更新电脑端文件服务，再打开 TS 视频"; return; }
             if (!legacyDirect && (status != 200 || ![result isKindOfClass:NSDictionary.class])) { s.statusLabel.text = @"准备视频失败，请检查电脑连接后点击播放重试"; return; }
             if (legacyDirect || [result[@"state"] isEqual:@"ready"]) {
@@ -267,6 +269,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     self.inputQueue = dispatch_queue_create("local.bixer.LanCinema.input", DISPATCH_QUEUE_SERIAL);
     self.historyHost = [NSUserDefaults.standardUserDefaults stringForKey:HostKey] ?: @"";
     self.historyLibrary = [NSUserDefaults.standardUserDefaults stringForKey:@"libraryID"] ?: @"";
+    self.audioSessionGeneration = ++PlaybackSessionGeneration;
     self.wantsPlayback = YES;
     self.view.backgroundColor = UIColor.blackColor;
     self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
@@ -1087,6 +1090,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 }
 - (void)watchFullVideo {
     if (!self.previewMode) return;
+    [self cancelPreviewAnalysis];
     self.previewMode = NO; self.previewBar.hidden = YES;
     BOOL ended = self.previewFinished || self.player.state == VLCMediaPlayerStateEnded || self.player.state == VLCMediaPlayerStateStopped;
     self.previewFinished = NO;
@@ -1098,6 +1102,13 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     }
     // Continuing a running preview only removes its bound: same input and clock.
     [self setPlaybackControlsVisible:YES];
+}
+- (void)cancelPreviewAnalysis {
+    if (!self.previewMode || self.prepared) return;
+    NSURL *url = ServiceURL(@"/api/preview-cancel", self.item[@"path"]); if (!url) return;
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+    request.HTTPMethod = @"POST"; request.timeoutInterval = 3;
+    [[NSURLSession.sharedSession dataTaskWithRequest:request] resume];
 }
 - (void)showTracks {
     [self endBoost];
@@ -1223,6 +1234,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 }
 - (void)stopPlayer {
     if (self.closed) return;
+    [self cancelPreviewAnalysis];
     [self endBoost];
     [self saveProgress];
     self.closed = YES;
@@ -1242,13 +1254,16 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         dispatch_async(dispatch_get_main_queue(), ^{
             stoppingPlayer.drawable = nil;
             [stoppingSurface removeFromSuperview];
+            // Also release a session activated before preflight completed.
+            // An older closing controller must never deactivate its successor.
+            if (self.audioSessionGeneration == PlaybackSessionGeneration)
+                [AVAudioSession.sharedInstance setActive:NO withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
             if (self.stopped) { void (^completion)(void) = self.stopped; self.stopped = nil; completion(); }
         });
     });
     [NSNotificationCenter.defaultCenter removeObserver:self];
     UIApplication.sharedApplication.idleTimerDisabled = NO;
-    // The native VLC audio output deactivates its session after stopping.
-    // Do not deactivate a new player's route while an old input is shutting down.
+    // Session teardown is deferred until native input shutdown completes.
 }
 - (void)viewDidDisappear:(BOOL)animated {
     [super viewDidDisappear:animated];

@@ -220,6 +220,15 @@
     XCTAssertEqual(p.player.currentAudioPlaybackDelay, 150000);
     LCSetAudioDelayMilliseconds(p.progressKey, 0); [self close:p];
 }
+- (void)testClosePreparingPreviewThenImmediatelyOpenFullVideo {
+    PlayerController *preview = [self openAt:0 preview:YES];
+    [preview stopPlayer]; [preview dismissViewControllerAnimated:NO completion:nil];
+    PlayerController *full = [self openAt:0];
+    [self checkPlaybackProgress:full label:@"close-preparing-open-full"];
+    XCTAssertTrue([[preview valueForKey:@"closed"] boolValue]);
+    XCTAssertFalse([[full valueForKey:@"closed"] boolValue]);
+    [self close:full];
+}
 - (void)testPreviewBoundsHistoryIsolationAndSameInputFullPlayback {
     NSString *library = [NSUserDefaults.standardUserDefaults stringForKey:@"libraryID"] ?: @"";
     NSDictionary *item = @{@"path":@"演示文件夹/时间戳偏移测试.ts", @"name":@"Audio regression.ts"};

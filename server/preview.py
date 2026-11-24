@@ -95,6 +95,7 @@ class PreviewCache:
         self.active = None
         self.closed = False
         self.process = None
+        self.cancelled_key = None
         base = Path(os.environ.get('LOCALAPPDATA', tempfile.gettempdir()))
         self.directory = Path(directory) if directory else base/'LanCinema'/'preview-cache'
 
@@ -104,7 +105,7 @@ class PreviewCache:
 
     def _run(self, command, timeout):
         with self.lock:
-            if self.closed: raise OSError('closed')
+            if self.closed or self.cancelled_key == self.active: raise OSError('cancelled')
             process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                        creationflags=0x08004000 if os.name == 'nt' else 0)
             self.process = process
@@ -197,16 +198,30 @@ class PreviewCache:
         except (OSError, ValueError, ImportError, subprocess.TimeoutExpired):
             pass
         finally:
+            with self.lock:
+                cancelled = self.closed or self.cancelled_key == key
             try:
-                if self.key(identity) == key: self._write(key, result)
+                if cancelled: pass
+                elif self.key(identity) == key: self._write(key, result)
                 else: result = {'state': 'error', 'error': '视频已改变，请重新打开'}
             except OSError:
                 result = {'state': 'error', 'error': '视频已移动或删除，请换一部'}
             with self.lock:
-                self.results[key] = result
+                if not cancelled: self.results[key] = result
                 while len(self.results) > 256:
                     self.results.popitem(last=False)
                 self.active = None
+                if self.cancelled_key == key: self.cancelled_key = None
+
+    def cancel(self, identity):
+        key = self.key(identity)
+        with self.lock:
+            if self.active != key: return
+            self.cancelled_key = key
+            process = self.process
+        if process:
+            try: process.kill()
+            except OSError: pass
 
     def close(self):
         with self.lock:

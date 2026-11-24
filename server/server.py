@@ -152,6 +152,15 @@ class Handler(BaseHTTPRequestHandler):
         token = parse_qs(route.query, keep_blank_values=True).get('token', [''])[0]
         if not hmac.compare_digest(token.encode(), self.server.token.encode()):
             return self.error(401, '访问码不正确')
+        if route.path == '/api/preview-cancel':
+            try:
+                source = self.resolve(parse_qs(route.query).get('path', [''])[0])
+                self.server.preview_cache.cancel(source)
+                return self.reply(200, b'{"state":"cancelled"}')
+            except FileNotFoundError:
+                return self.error(404, '视频已移动或删除')
+            except (OSError, ValueError):
+                return self.error(403, '无法访问此路径')
         if route.path != '/api/sync':
             return self.error(404, '接口不存在')
         try:

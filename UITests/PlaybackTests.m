@@ -650,6 +650,7 @@
     XCTAssertTrue([self.app.buttons[@"watchFullVideo"] waitForExistenceWithTimeout:15]);
     [self.app.buttons[@"watchFullVideo"] tap];
     XCTAssertFalse(self.app.buttons[@"changePreviewSegment"].isHittable);
+    [self waitForPlaybackSecondsFrom:1 to:59];
     [self assertVideoFramesAdvance:@"preview-full-frames"];
     [self closePlayback];
     [self.app.tables[@"allVideosList"].cells.firstMatch pressForDuration:1];

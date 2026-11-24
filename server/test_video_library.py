@@ -3,6 +3,7 @@ from pathlib import Path
 import tempfile
 import subprocess
 import shutil
+import sys
 import threading
 import time
 import unittest
@@ -130,6 +131,26 @@ class VideoLibraryTests(unittest.TestCase):
             self.assertIn(result['state'], ('preparing', 'waiting')); time.sleep(.05)
         self.assertEqual(result['state'], 'ready'); self.assertTrue(result['indexed'])
         self.assertEqual(json.loads(self.request('/api/preview', relative)[2]), result)
+
+    def test_cancellation_stops_only_selected_analysis_and_does_not_cache_failure(self):
+        source = self.roots[0]/'nested'/'Demo Video.mp4'
+        cache = PreviewCache(Path(self.temp.name)/'cancel-cache')
+        original_run = cache._run
+        with patch.object(cache, '_run', side_effect=lambda command, timeout: original_run([sys.executable, '-c', 'import time; time.sleep(20)'], timeout)):
+            cache.prepare(source)
+            deadline = time.monotonic()+3
+            while cache.process is None and time.monotonic() < deadline: time.sleep(.01)
+            self.assertIsNotNone(cache.process)
+            cache.cancel(self.roots[1]/'nested'/'Demo Video.mp4')
+            self.assertIsNone(cache.process.poll())
+            cache.cancel(source)
+            deadline = time.monotonic()+3
+            while cache.active and time.monotonic() < deadline: time.sleep(.01)
+            self.assertIsNone(cache.active); self.assertEqual(len(cache.results), 0)
+            self.assertEqual(list(cache.directory.glob('*.json')), [])
+        self.assertEqual(self.request('/api/preview-cancel', '', method='POST', token='bad')[0], 401)
+        self.assertEqual(self.request('/api/preview-cancel', '../outside.mp4', method='POST')[0], 403)
+        cache.close()
 
 
 class SegmentTests(unittest.TestCase):
