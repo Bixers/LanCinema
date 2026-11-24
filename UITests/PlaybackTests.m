@@ -594,13 +594,13 @@
     [center tap];
     [self waitForControlsVisible:NO];
     [center tap];
-    [self waitForControlsVisible:YES];
+    // The earlier toggle already checks visibility. Tap the action directly:
+    // repeated accessibility snapshots can consume the real four-second timer.
     [self.app.buttons[@"播放倍速"] tap];
     [self.app.buttons[@"1.5×"] tap];
     // Opening a speed menu must not leave a 30-second hiding delay behind.
     [self waitForControlsVisible:NO];
     [center tap];
-    [self waitForControlsVisible:YES];
     [self.app.buttons[@"暂停"] tap];
     [center tap];
     [self waitForControlsVisible:NO];

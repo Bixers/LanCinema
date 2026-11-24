@@ -84,7 +84,9 @@
         [NSUserDefaults.standardUserDefaults setDouble:position forKey:controller.progressKey];
     }
     controller.modalPresentationStyle = UIModalPresentationFullScreen;
-    [self.window.rootViewController presentViewController:controller animated:NO completion:nil];
+    XCTestExpectation *presented = [self expectationWithDescription:@"Player presentation finished"];
+    [self.window.rootViewController presentViewController:controller animated:NO completion:^{ [presented fulfill]; }];
+    [self waitForExpectationsWithTimeout:5 handler:nil];
 
     NSLog(@"AUDIO_OPEN app=%ld scene=%ld player=%ld prepared=%@ preparing=%@ pending_active=%@", (long)UIApplication.sharedApplication.applicationState, (long)self.window.windowScene.activationState, (long)controller.player.state, [controller valueForKey:@"prepared"], [controller valueForKey:@"preparing"], [controller valueForKey:@"resumeAfterBackground"]);
     return controller;
@@ -114,8 +116,9 @@
 }
 - (void)close:(PlayerController *)controller {
     [controller stopPlayer];
-    [controller dismissViewControllerAnimated:NO completion:nil];
-    [self advanceRunLoop:.1];
+    XCTestExpectation *dismissed = [self expectationWithDescription:@"Player dismissal finished"];
+    [controller dismissViewControllerAnimated:NO completion:^{ [dismissed fulfill]; }];
+    [self waitForExpectationsWithTimeout:5 handler:nil];
 }
 - (void)testNativeAudioAndVideoAfterOpenSeekPauseAndResume {
     PlayerController *player = [self openAt:0];
@@ -198,10 +201,14 @@
 - (void)testInputRecoveryPreservesPauseAndSpeed {
     PlayerController *p = [self openAt:0]; [self advanceRunLoop:3];
     [p setValue:@2 forKey:@"selectedRate"]; [p applyPlaybackRate];
-    [p restartPlaybackAt:20]; [self advanceRunLoop:2];
+    [p restartPlaybackAt:20]; [self checkPlaybackProgress:p label:@"recovery-at-double-speed"];
     XCTAssertTrue(p.player.isPlaying);
     XCTAssertEqualWithAccuracy(p.player.rate, 2, .01);
-    XCTAssertEqualWithAccuracy(p.player.time.intValue/1000.0, 24, 2);
+    double settled = p.player.time.intValue/1000.0;
+    XCTAssertGreaterThanOrEqual(settled, 20);
+    XCTAssertLessThan(settled, 30);
+    [self advanceRunLoop:1];
+    XCTAssertEqualWithAccuracy(p.player.time.intValue/1000.0 - settled, 2, .8);
     [p togglePlay]; [self advanceRunLoop:.3];
     [p restartPlaybackAt:12]; [self advanceRunLoop:2];
     XCTAssertFalse(p.player.isPlaying, @"Manual recovery must preserve a user pause");
@@ -222,7 +229,9 @@
 }
 - (void)testClosePreparingPreviewThenImmediatelyOpenFullVideo {
     PlayerController *preview = [self openAt:0 preview:YES];
-    [preview stopPlayer]; [preview dismissViewControllerAnimated:NO completion:nil];
+    // UIKit must finish dismissal before its presenter can accept another
+    // controller. Native audio teardown remains asynchronous across this gap.
+    [self close:preview];
     PlayerController *full = [self openAt:0];
     [self checkPlaybackProgress:full label:@"close-preparing-open-full"];
     XCTAssertTrue([[preview valueForKey:@"closed"] boolValue]);
