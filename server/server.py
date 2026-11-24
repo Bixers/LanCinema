@@ -16,6 +16,8 @@ from urllib.parse import parse_qs, urlsplit
 from playback_cache import PlaybackCache, requires_indexed_playback
 from shared_library import normalize_roots, mount_names
 from thumbnails import ThumbnailCache
+from video_library import VideoLibrary
+from preview import PreviewCache
 from user_state import UserState
 import sqlite3
 
@@ -39,9 +41,13 @@ class MediaServer(ThreadingHTTPServer):
         self.library_id = hashlib.sha256(identity.encode()).hexdigest()[:16]
         self.playback_cache = PlaybackCache()
         self.thumbnail_cache = ThumbnailCache()
+        self.video_library = VideoLibrary(self.roots, self.mounts, VIDEO)
+        self.preview_cache = PreviewCache()
         super().__init__(address, Handler)
 
     def server_close(self):
+        self.video_library.close()
+        self.preview_cache.close()
         self.playback_cache.close()
         super().server_close()
 
@@ -102,7 +108,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def search(self, start, keyword, root, prefix):
         """Visit every readable descendant, without following cycles or escaping the search scope."""
-        needle = unicodedata.normalize('NFKC', keyword).casefold()
+        needles = unicodedata.normalize('NFKC', keyword).casefold().split()
         pending, visited, results, skipped = [start], set(), [], 0
         while pending:
             directory = pending.pop()
@@ -121,7 +127,8 @@ class Handler(BaseHTTPRequestHandler):
                             checked.relative_to(start)
                             if checked.is_dir():
                                 pending.append(lexical)
-                            if needle in unicodedata.normalize('NFKC', entry.name).casefold():
+                            searchable = unicodedata.normalize('NFKC', prefix + lexical.relative_to(root).as_posix()).casefold()
+                            if all(needle in searchable for needle in needles):
                                 item = self.describe(lexical, checked, root, prefix)
                                 if item is not None:
                                     results.append(item)
@@ -176,7 +183,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.error(401, '访问码不正确')
             if route.path == '/api/info':
                 return self.reply(200, json.dumps({'name': socket.gethostname(), 'root': self.server.root_label, 'libraryID': self.server.library_id, 'syncProtocol': 1}, ensure_ascii=False).encode())
-            if route.path not in ('/api/list', '/api/search', '/api/crop', '/api/playback', '/api/thumbnail', '/media'):
+            if route.path == '/api/library':
+                result = self.server.video_library.snapshot(query.get('refresh', [''])[0] == '1')
+                return self.reply(200, json.dumps(dict(result, libraryID=self.server.library_id), ensure_ascii=False).encode())
+            if route.path not in ('/api/list', '/api/search', '/api/crop', '/api/playback', '/api/preview', '/api/thumbnail', '/media'):
                 return self.error(404, '接口不存在')
             relative = query.get('path', [''])[0]
             if not relative and self.server.mounts:
@@ -186,13 +196,13 @@ class Handler(BaseHTTPRequestHandler):
                 if route.path == '/api/search' and not keyword:
                     return self.error(400, '请输入搜索关键词')
                 items, skipped = [], 0
-                needle = unicodedata.normalize('NFKC', keyword).casefold()
+                needles = unicodedata.normalize('NFKC', keyword).casefold().split()
                 for name, root in self.server.mounts.items():
                     try:
                         modified = root.stat().st_mtime
                     except OSError:
                         modified = 0
-                    if route.path == '/api/list' or needle in unicodedata.normalize('NFKC', name).casefold():
+                    if route.path == '/api/list' or all(needle in unicodedata.normalize('NFKC', name).casefold() for needle in needles):
                         items.append({'name': name, 'path': name, 'directory': True,
                                       'size': 0, 'modified': modified, 'video': False, 'subtitle': False})
                     if route.path == '/api/search':
@@ -209,11 +219,15 @@ class Handler(BaseHTTPRequestHandler):
                     return self.error(400, '不是视频文件')
                 status, data = self.server.thumbnail_cache.get(path)
                 return self.reply(status, data, 'image/jpeg', {'Retry-After': '2'} if status == 503 else None)
-            if route.path == '/api/playback':
+            if route.path in ('/api/playback', '/api/preview'):
                 if not path.is_file() or path.suffix.lower() not in VIDEO:
                     return self.error(400, '不是视频文件')
                 indexed = requires_indexed_playback(path)
                 result = self.server.playback_cache.prepare(path) if indexed else {'state': 'ready'}
+                if route.path == '/api/preview' and result.get('state') == 'ready':
+                    source = self.server.playback_cache.ready_path(path) if indexed else path
+                    preview = self.server.preview_cache.prepare(source) if source else {'state': 'preparing'}
+                    result = dict(result, **preview)
                 return self.reply(200, json.dumps(dict(result, indexed=indexed), ensure_ascii=False).encode())
             if route.path == '/api/crop':
                 if not path.is_file() or path.suffix.lower() not in VIDEO:

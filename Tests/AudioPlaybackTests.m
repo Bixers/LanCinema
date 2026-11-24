@@ -3,14 +3,13 @@
 #import <AVFoundation/AVFoundation.h>
 #import <MobileVLCKit/MobileVLCKit.h>
 #import "../App/Connection.h"
-#import "../App/AudioOutput.h"
+#import "../App/PlaybackTiming.h"
 #import "../App/PlaybackHistory.h"
 #import "../App/PlaybackHealth.h"
 
 @interface PlayerController : UIViewController
 @property(nonatomic, copy) NSDictionary *item;
 @property(nonatomic, strong) VLCMediaPlayer *player;
-@property(nonatomic, strong) LCAudioOutput *audioOutput;
 - (NSString *)progressKey;
 - (void)seekToTime:(double)seconds;
 - (void)togglePlay;
@@ -22,6 +21,8 @@
 - (void)restartPlaybackAt:(double)seconds;
 - (void)saveProgress;
 - (double)currentPlaybackTime;
+- (void)changePreviewSegment;
+- (void)watchFullVideo;
 @end
 
 @interface AudioPlaybackTests : XCTestCase
@@ -72,63 +73,70 @@
     XCTAssertTrue(ready);
 }
 - (PlayerController *)openAt:(double)position {
+    return [self openAt:position preview:NO];
+}
+- (PlayerController *)openAt:(double)position preview:(BOOL)preview {
     PlayerController *controller = [PlayerController new];
     controller.item = @{@"path": @"演示文件夹/时间戳偏移测试.ts", @"name": @"Audio regression.ts"};
-    [LCPlaybackHistory.shared removePath:controller.item[@"path"] host:@"127.0.0.1" library:[NSUserDefaults.standardUserDefaults stringForKey:@"libraryID"]];
-    [NSUserDefaults.standardUserDefaults setDouble:position forKey:controller.progressKey];
+    [controller setValue:@(preview) forKey:@"previewMode"];
+    if (!preview) {
+        [LCPlaybackHistory.shared removePath:controller.item[@"path"] host:@"127.0.0.1" library:[NSUserDefaults.standardUserDefaults stringForKey:@"libraryID"]];
+        [NSUserDefaults.standardUserDefaults setDouble:position forKey:controller.progressKey];
+    }
     controller.modalPresentationStyle = UIModalPresentationFullScreen;
     [self.window.rootViewController presentViewController:controller animated:NO completion:nil];
-    XCTAssertNotNil(controller.audioOutput);
-    [controller.audioOutput beginRenderProbe];
+
     NSLog(@"AUDIO_OPEN app=%ld scene=%ld player=%ld prepared=%@ preparing=%@ pending_active=%@", (long)UIApplication.sharedApplication.applicationState, (long)self.window.windowScene.activationState, (long)controller.player.state, [controller valueForKey:@"prepared"], [controller valueForKey:@"preparing"], [controller valueForKey:@"resumeAfterBackground"]);
     return controller;
 }
 - (double)checkSound:(PlayerController *)controller label:(NSString *)label {
-    // Observe non-silent PCM rendered by the production AVAudioEngine mixer.
-    // This is downstream of decoding and scheduling, with no replacement sink.
-    [self advanceRunLoop:2];
-    NSLog(@"AUDIO_STATE %@ app=%ld player=%ld media=%d prepared=%@ preparing=%@ pending_active=%@ status=%@", label, (long)UIApplication.sharedApplication.applicationState, (long)controller.player.state, controller.player.media != nil, [controller valueForKey:@"prepared"], [controller valueForKey:@"preparing"], [controller valueForKey:@"resumeAfterBackground"], [[controller valueForKey:@"statusLabel"] text]);
-    double delay = controller.audioOutput.renderProbeDelay;
-    NSUInteger count = controller.audioOutput.renderedNonSilentBuffers;
-    double longestGap = controller.audioOutput.renderProbeLongestGap;
-    NSLog(@"AUDIO_RENDER %@ first_non_silent=%.3f longest_gap=%.3f buffers=%lu time=%.3f", label, delay, longestGap, (unsigned long)count, controller.player.time.intValue/1000.0);
-    XCTAssertGreaterThanOrEqual(delay, 0, @"Mixer stayed silent: %@", label);
-    XCTAssertLessThan(delay, 1.0, @"Audio recovery exceeded one second: %@", label);
-    XCTAssertGreaterThan(count, 5, @"Audio did not continue rendering: %@", label);
-    XCTAssertLessThan(longestGap, 1.0, @"Mixer lost audio during playback: %@", label);
-    return delay;
+    // Native VLC owns the AudioUnit and A/V clock. These checks verify audio
+    // decoding and displayed video advance together, not physical lip-sync.
+    // Hardware presentation requires the synchronized flash/tone fixture.
+    uint64_t initialAudio = controller.player.media.statistics.decodedAudio;
+    [self advanceRunLoop:3];
+    uint64_t audio = controller.player.media.statistics.decodedAudio;
+    uint64_t pictures = controller.player.media.statistics.displayedPictures;
+    NSLog(@"NATIVE_AV %@ audio=%llu pictures=%llu position=%.3f delay_us=%ld", label,
+          audio, pictures, controller.player.time.intValue/1000.0,
+          (long)controller.player.currentAudioPlaybackDelay);
+    XCTAssertGreaterThan(audio, initialAudio, @"Audio decoding did not advance: %@", label);
+    XCTAssertGreaterThan(pictures, 0, @"No video frames displayed: %@", label);
+    XCTAssertGreaterThanOrEqual(controller.player.currentAudioTrackIndex, 0);
+    XCTAssertTrue(controller.player.isPlaying);
+    return 3;
 }
 - (void)close:(PlayerController *)controller {
     [controller stopPlayer];
     [controller dismissViewControllerAnimated:NO completion:nil];
     [self advanceRunLoop:.1];
 }
-- (void)testRenderedAudioAfterOpenSeekPauseAndResume {
+- (void)testNativeAudioAndVideoAfterOpenSeekPauseAndResume {
     PlayerController *player = [self openAt:0];
     double open = [self checkSound:player label:@"open"];
-    [player.audioOutput beginRenderProbe]; [player seekToTime:39];
+    [player seekToTime:39];
     double forward = [self checkSound:player label:@"forward"];
     XCTAssertEqualWithAccuracy(player.player.time.intValue/1000.0, 41, 1.5);
-    [player.audioOutput beginRenderProbe]; [player seekToTime:12];
+    [player seekToTime:12];
     double backward = [self checkSound:player label:@"backward"];
     [player togglePlay];
     [self advanceRunLoop:.5];
-    [player.audioOutput beginRenderProbe]; [player togglePlay];
+    [player togglePlay];
     double unpause = [self checkSound:player label:@"unpause"];
     [player togglePlay];
     [self advanceRunLoop:.3];
     [player seekToTime:20];
     [self advanceRunLoop:.3];
-    [player.audioOutput beginRenderProbe]; [player togglePlay];
+    [player togglePlay];
     double pausedSeek = [self checkSound:player label:@"paused-seek"];
     [player setValue:@2 forKey:@"selectedRate"];
-    [player applyPlaybackRate]; [player.audioOutput beginRenderProbe];
+    [player applyPlaybackRate];
     double speed = [self checkSound:player label:@"double-speed"];
     NSNotification *began = [NSNotification notificationWithName:AVAudioSessionInterruptionNotification object:nil userInfo:@{AVAudioSessionInterruptionTypeKey:@(AVAudioSessionInterruptionTypeBegan)}];
     NSNotification *ended = [NSNotification notificationWithName:AVAudioSessionInterruptionNotification object:nil userInfo:@{AVAudioSessionInterruptionTypeKey:@(AVAudioSessionInterruptionTypeEnded), AVAudioSessionInterruptionOptionKey:@(AVAudioSessionInterruptionOptionShouldResume)}];
     [player audioInterrupted:began]; [self advanceRunLoop:.3];
     XCTAssertFalse(player.player.isPlaying);
-    [player.audioOutput beginRenderProbe]; [player audioInterrupted:ended];
+    [player audioInterrupted:ended];
     [self checkSound:player label:@"interruption"];
     [player togglePlay]; [self advanceRunLoop:.3];
     [player audioInterrupted:began]; [player audioInterrupted:ended];
@@ -140,7 +148,7 @@
     double resume = [self checkSound:resumed label:@"resume"];
     XCTAssertEqualWithAccuracy(resumed.player.time.intValue/1000.0, 25, 1.5);
     [self close:resumed];
-    NSLog(@"AUDIO_RENDER summary open=%.3f forward=%.3f backward=%.3f unpause=%.3f paused_seek=%.3f speed=%.3f resume=%.3f", open, forward, backward, unpause, pausedSeek, speed, resume);
+    NSLog(@"NATIVE_AV observation_windows open=%.3f forward=%.3f backward=%.3f unpause=%.3f paused_seek=%.3f speed=%.3f resume=%.3f", open, forward, backward, unpause, pausedSeek, speed, resume);
 }
 - (void)testAudioAndSeekingAfterNaturalEnd {
     PlayerController *player = [self openAt:0];
@@ -154,7 +162,7 @@
     XCTAssertTrue([player canSeek], @"Ended media must remain seekable in the app");
     XCTAssertGreaterThan([player duration], 59);
     [player setValue:@"演示文件夹/中文字幕验证.srt" forKey:@"selectedExternalSubtitle"];
-    [player.audioOutput beginRenderProbe];
+
     [player seekToTime:12];
     [self checkSound:player label:@"seek-after-end"];
     XCTAssertEqualWithAccuracy(player.player.time.intValue / 1000.0, 14, 1.5);
@@ -165,7 +173,7 @@
 }
 - (void)testRapidSeeksAndUnconfirmedPositionNeverSaved {
     PlayerController *p = [self openAt:0]; [self advanceRunLoop:3];
-    [p.audioOutput beginRenderProbe];
+
     [p seekToTime:42]; [p seekToTime:8]; [p seekToTime:28];
     [self checkSound:p label:@"rapid-latest-seek"];
     XCTAssertEqualWithAccuracy(p.player.time.intValue/1000.0, 30, 1.5);
@@ -195,6 +203,40 @@
     XCTAssertEqualWithAccuracy([p currentPlaybackTime], 12, 2);
     [p togglePlay]; [self advanceRunLoop:1];
     XCTAssertEqualWithAccuracy(p.player.time.intValue/1000.0, 14, 2);
+    [self close:p];
+}
+- (void)testCalibrationReappliedAfterInputReplacement {
+    PlayerController *p = [self openAt:0]; [self checkSound:p label:@"calibration-open"];
+    LCSetAudioDelayMilliseconds(p.progressKey, 150);
+    [p restartPlaybackAt:20]; [self checkSound:p label:@"calibration-reopen"];
+    XCTAssertEqual(p.player.currentAudioPlaybackDelay, 150000);
+    [p seekToTime:10]; [self checkSound:p label:@"calibration-seek"];
+    XCTAssertEqual(p.player.currentAudioPlaybackDelay, 150000);
+    LCSetAudioDelayMilliseconds(p.progressKey, 0); [self close:p];
+}
+- (void)testPreviewBoundsHistoryIsolationAndSameInputFullPlayback {
+    NSString *library = [NSUserDefaults.standardUserDefaults stringForKey:@"libraryID"] ?: @"";
+    NSDictionary *item = @{@"path":@"演示文件夹/时间戳偏移测试.ts", @"name":@"Audio regression.ts"};
+    [LCPlaybackHistory.shared saveItem:item host:@"127.0.0.1" library:library position:7 duration:60];
+    PlayerController *p = [self openAt:0 preview:YES]; [self advanceRunLoop:5];
+    XCTAssertTrue(p.player.isPlaying);
+    NSArray *clips = [p valueForKey:@"previewClips"]; XCTAssertGreaterThan(clips.count, 1);
+    NSUInteger first = [[p valueForKey:@"previewIndex"] unsignedIntegerValue];
+    [p changePreviewSegment]; [self checkSound:p label:@"preview-change-segment"];
+    NSUInteger second = [[p valueForKey:@"previewIndex"] unsignedIntegerValue]; XCTAssertNotEqual(first, second);
+    double end = [clips[second][@"end"] doubleValue];
+    [p seekToTime:end-.8]; [self advanceRunLoop:4];
+    XCTAssertTrue([[p valueForKey:@"previewFinished"] boolValue]); XCTAssertFalse(p.player.isPlaying);
+    XCTAssertLessThan(p.player.time.intValue/1000., end+1);
+    [p saveProgress];
+    XCTAssertEqualWithAccuracy([LCPlaybackHistory.shared positionForItem:item host:@"127.0.0.1" library:library], 7, .01);
+    [p changePreviewSegment]; [self checkSound:p label:@"preview-another-segment"];
+    VLCMedia *input = p.player.media;
+    [p watchFullVideo];
+    XCTAssertEqual(p.player.media, input, @"Watching full video should retain the running input and clock");
+    XCTAssertFalse([[p valueForKey:@"previewMode"] boolValue]);
+    [self checkSound:p label:@"preview-to-full"]; [p saveProgress];
+    XCTAssertGreaterThan([LCPlaybackHistory.shared positionForItem:item host:@"127.0.0.1" library:library], 7);
     [self close:p];
 }
 - (void)tearDown {

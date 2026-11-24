@@ -611,6 +611,51 @@
     [self capture:@"controls-tap-revealed"];
     [self closePlayback];
 }
+- (void)openAudioCalibration {
+    [self showPlayerControls]; [self.app.buttons[@"字幕和音轨"] tap];
+    [self.app.buttons[@"音画校准"] tap];
+    XCTAssertTrue([self.app.cells[@"audioSyncStatus"] waitForExistenceWithTimeout:5]);
+}
+- (void)testAudioCalibrationPersistenceAndAppearance {
+    [self openTransportStream]; [self openAudioCalibration];
+    [self.app.cells[@"delayAudio"] tap]; [self.app.cells[@"delayAudio"] tap];
+    XCTAssertTrue(self.app.staticTexts[@"声音延后 100 毫秒"].exists);
+    [self capture:@"audio-calibration-landscape"];
+    [self.app.buttons[@"完成"] tap]; [self closePlayback];
+    [self.app terminate]; self.app.launchArguments = @[@"--ui-test-keep-controls"]; [self.app launch];
+    [self openTransportStream]; [self openAudioCalibration];
+    XCTAssertTrue(self.app.staticTexts[@"声音延后 100 毫秒"].exists);
+    [self.app.cells[@"advanceAudio"] tap]; XCTAssertTrue(self.app.staticTexts[@"声音延后 50 毫秒"].exists);
+    [self.app.cells[@"resetAudioDelay"] tap]; XCTAssertTrue(self.app.staticTexts[@"额外补偿：0 毫秒"].exists);
+    [self.app.buttons[@"完成"] tap]; [self closePlayback];
+}
+- (void)testAllVideosSearchHistoryFolderAndPreview {
+    XCTAssertTrue([self.app.buttons[@"allVideos"] waitForExistenceWithTimeout:20]); [self.app.buttons[@"allVideos"] tap];
+    XCTAssertTrue([self.app.tables[@"allVideosList"].cells.firstMatch waitForExistenceWithTimeout:20]);
+    [self capture:@"all-videos-large-covers"];
+    XCUIElement *search = self.app.searchFields.firstMatch;
+    [search tap]; [search typeText:@"演示文件夹 时间戳\n"];
+    XCTAssertEqual(self.app.tables[@"allVideosList"].cells.count, 1);
+    [self capture:@"all-videos-path-keywords"];
+    [self.app.buttons[@"搜索历史"] tap]; XCTAssertTrue(self.app.buttons[@"演示文件夹 时间戳"].exists);
+    [self.app.buttons[@"取消"] tap];
+    [self.app.buttons[@"randomPreview"] tap];
+    XCTAssertTrue([self.app.buttons[@"changePreviewSegment"] waitForExistenceWithTimeout:10]);
+    NSPredicate *enabled = [NSPredicate predicateWithFormat:@"enabled == YES"];
+    [self expectationForPredicate:enabled evaluatedWithObject:self.app.buttons[@"changePreviewSegment"] handler:nil];
+    [self waitForExpectationsWithTimeout:20 handler:nil];
+    [self.app.buttons[@"changePreviewSegment"] tap];
+    [self capture:@"random-preview-controls"];
+    [self.app.buttons[@"changePreviewVideo"] tap];
+    XCTAssertTrue([self.app.buttons[@"watchFullVideo"] waitForExistenceWithTimeout:15]);
+    [self.app.buttons[@"watchFullVideo"] tap];
+    XCTAssertFalse(self.app.buttons[@"changePreviewSegment"].isHittable);
+    [self assertVideoFramesAdvance:@"preview-full-frames"];
+    [self closePlayback];
+    [self.app.tables[@"allVideosList"].cells.firstMatch pressForDuration:1];
+    [self.app.buttons[@"打开所在文件夹"] tap];
+    XCTAssertTrue([self.app.staticTexts[@"时间戳偏移测试.ts"] waitForExistenceWithTimeout:10]);
+}
 - (void)testExplorerAppearanceCaptures {
     XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
     [self capture:@"explorer-details-portrait"];

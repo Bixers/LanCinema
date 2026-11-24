@@ -10,6 +10,10 @@ on:
           - macos-26-intel
           - macos-15-intel
         default: macos-26
+      discovery:
+        description: 'Validate global library, random previews, audio calibration and playback'
+        type: boolean
+        default: false
       favorites:
         description: 'Validate favorites, browser, history and all unit/audio tests'
         type: boolean
@@ -120,7 +124,7 @@ jobs:
       - name: Run server checks
         run: |
           python3 -m pip install --break-system-packages imageio-ffmpeg
-          cd server && python3 -m unittest -v test_server.py test_multi_root.py test_video_probe.py test_playback_cache.py test_thumbnails.py test_user_state.py
+          cd server && python3 -m unittest -v test_server.py test_multi_root.py test_video_probe.py test_playback_cache.py test_thumbnails.py test_user_state.py test_video_library.py
       - name: Compile simulator tests
         run: |
           set -o pipefail
@@ -201,7 +205,17 @@ jobs:
           PY
           set -o pipefail
           TEST_SELECTION=()
-          if [ '${{ inputs.portrait }}' = 'true' ]; then
+          if [ '${{ inputs.discovery }}' = 'true' ]; then
+            TEST_SELECTION=(
+              '-only-testing:LanCinemaUITests/PlaybackTests/testAudioCalibrationPersistenceAndAppearance'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testAllVideosSearchHistoryFolderAndPreview'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testTransportStreamDurationSeekingAndResume'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testSeekAndReplayAfterVideoEnds'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testHorizontalCanvasSeekingWithoutGestureConflicts'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testControlsAutoHideAndTapToggle'
+              '-only-testing:LanCinemaTests'
+            )
+          elif [ '${{ inputs.portrait }}' = 'true' ]; then
             TEST_SELECTION=(
               '-only-testing:LanCinemaUITests/PlaybackTests/testPortraitVideoIgnoresDeviceRotation'
               '-only-testing:LanCinemaUITests/PlaybackTests/testRotatedPortraitVideoIgnoresDeviceRotation'

@@ -61,7 +61,8 @@ class MultiRootTests(unittest.TestCase):
             self.assertEqual(len(json.loads(body)['items']), 2)
             self.assertTrue(all(x['path'].startswith(name + '/') for x in json.loads(body)['items']))
         _, _, body = self.request('/api/search', '', query={'q': '同名文件夹'})
-        self.assertEqual(len(json.loads(body)['items']), 2)
+        # Matching the complete path includes descendants of both mounts.
+        self.assertEqual(len(json.loads(body)['items']), 8)
         self.assertEqual(self.request('/api/search', '', query={'q': ' '})[0], 400)
 
     def test_media_ranges_subtitles_and_probe_resolve_correct_root(self):

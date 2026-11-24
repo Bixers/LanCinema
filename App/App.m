@@ -3,7 +3,8 @@
 #import <MobileVLCKit/MobileVLCKit.h>
 #import <math.h>
 #import "Connection.h"
-#import "AudioOutput.h"
+#import "PlaybackTiming.h"
+#import "VideoLibrary.h"
 #import "FileSort.h"
 #import "FilePresentation.h"
 #import "VideoGeometry.h"
@@ -67,7 +68,6 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 @property(nonatomic) BOOL prepared;
 @property(nonatomic) BOOL indexedPlayback;
 @property(nonatomic, strong) VLCMediaPlayer *player;
-@property(nonatomic, strong) LCAudioOutput *audioOutput;
 @property(nonatomic, strong) UIView *canvas;
 @property(nonatomic, strong) UIView *videoSurface;
 @property(nonatomic, strong) UIButton *fitButton;
@@ -135,6 +135,15 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 @property(nonatomic) double lastFrameAt;
 @property(nonatomic) double lastSavedPlayableTime;
 @property(nonatomic) UIInterfaceOrientationMask videoOrientationMask;
+@property(nonatomic) BOOL previewMode;
+@property(nonatomic) BOOL previewFinished;
+@property(nonatomic, copy) NSArray *previewClips;
+@property(nonatomic) NSUInteger previewIndex;
+@property(nonatomic, strong) UIStackView *previewBar;
+@property(nonatomic, strong) UIButton *segmentButton;
+@property(nonatomic, copy) void (^nextPreview)(void);
+@property(nonatomic, copy) void (^stopped)(void);
+@property(nonatomic) NSInteger preparationGeneration;
 @end
 
 @implementation PlayerController
@@ -154,6 +163,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
                          self.historyLibrary ?: [NSUserDefaults.standardUserDefaults stringForKey:@"libraryID"], self.item[@"path"]);
 }
 - (VLCMedia *)playbackMedia {
+    if (self.previewMode) return [self playbackMediaStartingAt:[self.previewClips[self.previewIndex][@"start"] doubleValue]];
     double previous = [LCPlaybackHistory.shared positionForItem:self.item host:self.historyHost library:self.historyLibrary];
     return [self playbackMediaStartingAt:isfinite(previous) && previous > 3 ? previous : 0];
 }
@@ -167,10 +177,10 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     return url;
 }
 - (VLCMedia *)playbackMediaStartingAt:(double)position {
-    [self.audioOutput reset];
     VLCMedia *media = [VLCMedia mediaWithURL:[self playbackURL]];
-    // Retain a small jitter buffer for seekable local HTTP media.
-    [media addOption:@":network-caching=300"];
+    // Let VLC's native AudioUnit output report actual device latency to the
+    // same clock used for video. Prefer synchronized startup over minimum wait.
+    [media addOption:@":network-caching=1200"];
     [media addOption:@":audio-time-stretch"];
     // Select the resume point before input/audio output start. Starting at zero
     // and seeking from tick interrupted the first audio and buffered twice.
@@ -199,23 +209,36 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     if (self.closed) return;
     self.preparing = YES;
     self.playButton.enabled = NO;
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:ServiceURL(@"/api/playback", self.item[@"path"])];
+    NSInteger generation = ++self.preparationGeneration;
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:ServiceURL(self.previewMode ? @"/api/preview" : @"/api/playback", self.item[@"path"])];
     request.timeoutInterval = 15;
     __weak typeof(self) owner = self;
     self.playbackTask = [NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         NSDictionary *result = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
         dispatch_async(dispatch_get_main_queue(), ^{
             PlayerController *s = owner;
-            if (!s || s.closed) return;
+            if (!s || s.closed || generation != s.preparationGeneration) return;
             NSInteger status = [(NSHTTPURLResponse *)response statusCode];
             s.preparing = NO;
             s.playButton.enabled = YES;
             [s.diagnostics record:@"prepare" values:@{@"http":@(status), @"networkError":@(error.code)}];
             // Older servers only support TS preflight; retain direct playback for other formats.
-            BOOL legacyDirect = !error && (status == 400 || status == 404) && ![s isTransportStream];
+            BOOL legacyDirect = !s.previewMode && !error && (status == 400 || status == 404) && ![s isTransportStream];
+            if (status == 404 && s.previewMode) { s.statusLabel.text = @"请更新电脑端后使用随机试看\n也可直接看全片"; return; }
             if (status == 404 && !legacyDirect) { s.statusLabel.text = @"请更新电脑端文件服务，再打开 TS 视频"; return; }
             if (!legacyDirect && (status != 200 || ![result isKindOfClass:NSDictionary.class])) { s.statusLabel.text = @"准备视频失败，请检查电脑连接后点击播放重试"; return; }
             if (legacyDirect || [result[@"state"] isEqual:@"ready"]) {
+                if (s.previewMode) {
+                    NSMutableArray *clips = [NSMutableArray new];
+                    for (id clip in [result[@"clips"] isKindOfClass:NSArray.class] ? result[@"clips"] : @[]) {
+                        if (![clip isKindOfClass:NSDictionary.class] || ![clip[@"start"] isKindOfClass:NSNumber.class] || ![clip[@"end"] isKindOfClass:NSNumber.class]) continue;
+                        double start = [clip[@"start"] doubleValue], end = [clip[@"end"] doubleValue];
+                        if (isfinite(start) && isfinite(end) && start >= 0 && end > start && end-start <= 35) [clips addObject:clip];
+                    }
+                    if (!clips.count) { s.statusLabel.text = @"无法生成试看，可换一部或看全片"; return; }
+                    s.previewClips = clips; s.previewIndex = arc4random_uniform((uint32_t)clips.count);
+                    s.knownDuration = [result[@"duration"] doubleValue]; s.segmentButton.enabled = clips.count > 1;
+                }
                 s.indexedPlayback = !legacyDirect && [result[@"indexed"] boolValue];
                 s.prepared = YES;
                 s.subtitleFallback = [result[@"subtitleFallback"] boolValue];
@@ -226,7 +249,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
                 s.preparing = YES;
                 s.playButton.enabled = NO;
                 s.statusLabel.text = [result[@"state"] isEqual:@"waiting"] ? @"电脑正在准备其他视频，请稍候…" : @"正在准备视频\n首次打开可能稍久…";
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [owner preparePlayback]; });
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ if (owner.preparationGeneration == generation) [owner preparePlayback]; });
             } else {
                 s.statusLabel.text = [result[@"error"] isKindOfClass:NSString.class] ? result[@"error"] : @"无法准备该视频";
             }
@@ -392,6 +415,27 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     self.footer.translatesAutoresizingMaskIntoConstraints = NO;
     self.footer.accessibilityIdentifier = @"playerFooter";
     [self.view addSubview:self.footer];
+    if (self.previewMode) {
+        NSMutableArray *actions = [NSMutableArray new];
+        NSArray *titles = @[@"换一段", @"换一部", @"看全片"];
+        NSArray *selectors = @[@"changePreviewSegment", @"changePreviewVideo", @"watchFullVideo"];
+        for (NSUInteger i=0; i<titles.count; i++) {
+            UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+            UIButtonConfiguration *config = [UIButtonConfiguration tintedButtonConfiguration];
+            config.title = titles[i]; config.baseForegroundColor = UIColor.systemMintColor;
+            button.configuration = config; button.accessibilityIdentifier = selectors[i];
+            [button.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
+            [button addTarget:self action:NSSelectorFromString(selectors[i]) forControlEvents:UIControlEventTouchUpInside];
+            if (i == 0) { self.segmentButton = button; button.enabled = NO; }
+            [actions addObject:button];
+        }
+        self.previewBar = [[UIStackView alloc] initWithArrangedSubviews:actions]; self.previewBar.spacing = 8;
+        self.previewBar.distribution = UIStackViewDistributionFillEqually;
+        self.previewBar.backgroundColor = [UIColor colorWithWhite:0 alpha:.8];
+        self.previewBar.translatesAutoresizingMaskIntoConstraints = NO; [self.view addSubview:self.previewBar];
+        [NSLayoutConstraint activateConstraints:@[[self.previewBar.leadingAnchor constraintEqualToAnchor:self.footer.leadingAnchor],
+            [self.previewBar.trailingAnchor constraintEqualToAnchor:self.footer.trailingAnchor], [self.previewBar.bottomAnchor constraintEqualToAnchor:self.footer.topAnchor constant:-8]]];
+    }
     UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
     self.headerTop = [header.topAnchor constraintEqualToAnchor:safe.topAnchor constant:8];
     self.footerBottom = [self.footer.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-8];
@@ -425,7 +469,8 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     self.player.delegate = self;
     self.player.drawable = self.videoSurface;
     self.player.scaleFactor = 0;
-    self.audioOutput = [[LCAudioOutput alloc] initWithPlayer:self.player];
+    // Do not install amem callbacks: a separate AVAudioEngine cannot report
+    // its output delay back to VLC's clock and may drift after seeks/pauses.
     // Search results can live below the browser's current folder. Load subtitles beside this video.
     NSString *parent = [self.item[@"path"] stringByDeletingLastPathComponent];
     __weak typeof(self) subtitleOwner = self;
@@ -666,6 +711,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     self.controlsTouched = NSDate.timeIntervalSinceReferenceDate;
     self.header.hidden = !self.controlsVisible;
     self.footer.hidden = !self.controlsVisible;
+    self.previewBar.hidden = !self.previewMode || !visible;
     if (self.playbackEnded || self.player.state == VLCMediaPlayerStatePaused)
         self.statusLabel.hidden = !visible;
     [self setNeedsStatusBarAppearanceUpdate];
@@ -723,6 +769,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         return;
     }
     if (self.stoppingInput) return;
+    if (self.previewMode && self.previewFinished) { self.previewFinished = NO; self.wantsPlayback = YES; [self restartPlaybackAt:[self.previewClips[self.previewIndex][@"start"] doubleValue]]; return; }
     if (self.playbackEnded) { self.wantsPlayback = YES; [self restartPlaybackAt:0]; return; }
     if (self.recoveryFailed || self.player.state == VLCMediaPlayerStateError) {
         self.seekHealth = [LCPlaybackHealth new];
@@ -732,9 +779,14 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     if (self.player.isPlaying) { self.wantsPlayback = NO; [self.player pause]; [self saveProgress]; }
     else {
         self.wantsPlayback = YES;
-        [self.player play];
-        [self applyPlaybackRate];
+        [self resumeSynchronizedPlayback];
     }
+}
+- (void)resumeSynchronizedPlayback {
+    // Native AudioUnit pause flushes queued PCM. Reopen at the paused position
+    // so both decoders refill together instead of skipping that audio on resume.
+    if (self.prepared && !self.stoppingInput) [self restartPlaybackAt:[self currentPlaybackTime]];
+    else { [self.player play]; [self applyPlaybackRate]; }
 }
 - (double)duration {
     double measured = self.player.media.length.intValue / 1000.0;
@@ -748,6 +800,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 - (void)restartPlaybackAt:(double)seconds {
     if (self.closed || self.stoppingInput || self.audioInterruptionActive) return;
     double target = MAX(0, seconds);
+    if (self.previewMode && self.previewClips.count) target = MIN(MAX(target, [self.previewClips[self.previewIndex][@"start"] doubleValue]), [self.previewClips[self.previewIndex][@"end"] doubleValue]-.25);
     if ([self duration] > 0) target = MIN(target, MAX(0, [self duration] - .25));
     self.stoppingInput = YES;
     self.restartingPlayback = YES;
@@ -792,6 +845,10 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 - (void)seekToTime:(double)seconds {
     double duration = [self duration];
     if (![self canSeek]) return;
+    if (self.previewMode && self.previewClips.count) {
+        seconds = MIN(MAX(seconds, [self.previewClips[self.previewIndex][@"start"] doubleValue]), [self.previewClips[self.previewIndex][@"end"] doubleValue]-.25);
+        if (self.previewFinished) { self.previewFinished = NO; self.wantsPlayback = YES; [self restartPlaybackAt:seconds]; return; }
+    }
     if (self.playbackEnded) { self.wantsPlayback = YES; [self restartPlaybackAt:seconds]; return; }
     self.pendingSeekTime = MIN(MAX(seconds, 0), MAX(0, duration - 0.25));
     self.seekIssuedAt = NSDate.timeIntervalSinceReferenceDate;
@@ -820,6 +877,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 - (void)scrubEnd { [self seekToTime:self.slider.value * [self duration]]; self.scrubbing = NO; self.controlsTouched = NSDate.timeIntervalSinceReferenceDate; }
 - (void)scrubCancel { self.scrubbing = NO; self.controlsTouched = NSDate.timeIntervalSinceReferenceDate; }
 - (void)saveProgress {
+    if (self.previewMode) return;
     // Save only a position verified by displayed video, never a requested seek.
     if (self.restored && self.lastPlayableTime > 0 && self.lastPlayableTime != self.lastSavedPlayableTime && !self.playbackEnded && !self.restartingPlayback && self.player.state != VLCMediaPlayerStateEnded) {
         [LCPlaybackHistory.shared saveItem:self.item host:self.historyHost library:self.historyLibrary position:self.lastPlayableTime duration:[self duration]];
@@ -832,7 +890,10 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         @"decodedAudio":@(self.player.media.statistics.decodedAudio), @"decodedVideo":@(self.player.media.statistics.decodedVideo),
         @"lostPictures":@(self.player.media.statistics.lostPictures), @"seekable":@(self.player.isSeekable),
         @"seekPending":@(self.seekHealth.pending), @"rate":@(self.player.rate), @"indexedTS":@([self isTransportStream]),
-        @"recoveryFailed":@(self.recoveryFailed)}];
+        @"recoveryFailed":@(self.recoveryFailed), @"nativeAudioOutput":@YES,
+        @"deviceOutputLatencyMilliseconds":@(AVAudioSession.sharedInstance.outputLatency*1000),
+        @"preview":@(self.previewMode),
+        @"networkCacheMilliseconds":@1200, @"audioDelayMicroseconds":@(self.player.currentAudioPlaybackDelay)}];
 }
 - (void)showDiagnostics {
     [self endBoost]; self.controlsTouched = NSDate.timeIntervalSinceReferenceDate;
@@ -887,6 +948,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     double duration = [self duration];
     NSInteger displayed = self.player.media.statistics.displayedPictures;
     double actualTime = MAX(0, self.player.time.intValue / 1000.0);
+    if (self.previewMode && self.previewClips.count && !self.previewFinished && !self.waitingForSeekFrames && actualTime >= [self.previewClips[self.previewIndex][@"end"] doubleValue]) [self finishPreview];
     // A paused reopen needs one decoded picture, not a running playback clock.
     // Stop at the first picture even if VLC has not published the target time.
     if (self.restoreTracksOnPlay && !self.wantsPlayback && displayed > 0 && self.player.isPlaying) [self.player pause];
@@ -943,6 +1005,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
                 self.statusLabel.text = @"";
                 self.statusLabel.hidden = NO;
                 [self applyPlaybackRate];
+                self.player.currentAudioPlaybackDelay = LCAudioDelayMilliseconds(self.progressKey) * 1000;
                 break;
             case VLCMediaPlayerStateOpening: self.statusLabel.hidden = NO; self.statusLabel.text = @"正在打开视频…"; break;
             case VLCMediaPlayerStateBuffering: self.statusLabel.hidden = NO; self.statusLabel.text = @"正在缓冲…"; break;
@@ -954,6 +1017,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
                 if (!self.controlsVisible) [self toggleControls];
                 break;
             case VLCMediaPlayerStateEnded:
+                if (self.previewMode) { self.playbackEnded = YES; [self finishPreview]; break; }
                 self.restartingPlayback = NO;
                 [self duration];
                 self.playbackEnded = YES;
@@ -970,6 +1034,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
                 if (!self.controlsVisible) [self toggleControls];
                 break;
             case VLCMediaPlayerStatePaused:
+                if (self.previewFinished) break;
                 if (!self.recoveryFailed) { self.statusLabel.text = @"已暂停"; self.statusLabel.hidden = !self.controlsVisible; }
                 break;
             default: break;
@@ -983,14 +1048,57 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         if (self.player.isPlaying && !self.recoveryFailed) self.statusLabel.text = @"";
     });
 }
+- (void)finishPreview {
+    self.previewFinished = YES; self.wantsPlayback = NO;
+    [self.player pause]; [self.seekHealth cancel]; self.hasPendingSeek = NO; self.waitingForSeekFrames = NO;
+    self.statusLabel.text = @"试看结束\n换一段，或继续看全片"; self.statusLabel.hidden = NO;
+    [self setPlaybackControlsVisible:YES];
+}
+- (void)changePreviewSegment {
+    if (!self.previewMode || self.previewClips.count < 2 || self.stoppingInput) return;
+    self.previewIndex = (self.previewIndex + 1) % self.previewClips.count;
+    self.previewFinished = NO; self.wantsPlayback = YES;
+    [self restartPlaybackAt:[self.previewClips[self.previewIndex][@"start"] doubleValue]];
+}
+- (void)changePreviewVideo {
+    if (self.closed || !self.nextPreview) return;
+    void (^next)(void) = self.nextPreview;
+    __weak typeof(self) owner = self;
+    self.stopped = ^{ [owner dismissViewControllerAnimated:NO completion:next]; };
+    [self stopPlayer];
+}
+- (void)watchFullVideo {
+    if (!self.previewMode) return;
+    self.previewMode = NO; self.previewBar.hidden = YES;
+    BOOL ended = self.previewFinished || self.player.state == VLCMediaPlayerStateEnded || self.player.state == VLCMediaPlayerStateStopped;
+    self.previewFinished = NO;
+    if (!self.prepared) {
+        ++self.preparationGeneration; [self.playbackTask cancel]; self.preparing = NO;
+        [self preparePlayback];
+    } else if (ended) {
+        self.wantsPlayback = YES; [self restartPlaybackAt:MAX(0, self.player.time.intValue/1000.0)];
+    }
+    // Continuing a running preview only removes its bound: same input and clock.
+    [self setPlaybackControlsVisible:YES];
+}
 - (void)showTracks {
     [self endBoost];
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"字幕与音轨" message:self.subtitleFallback ? @"该 TS 的内嵌字幕无法用于播放缓存，仍可选择外挂字幕。" : nil preferredStyle:UIAlertControllerStyleActionSheet];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"音画校准" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        LCAudioTimingController *panel = [LCAudioTimingController new];
+        panel.scope = self.progressKey;
+        __weak typeof(self) owner = self;
+        panel.changed = ^(NSInteger milliseconds) {
+            owner.player.currentAudioPlaybackDelay = milliseconds * 1000;
+            [owner.diagnostics record:@"audio_delay" values:@{@"milliseconds":@(milliseconds)}];
+        };
+        [self presentViewController:[[UINavigationController alloc] initWithRootViewController:panel] animated:YES completion:nil];
+    }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"从头重新播放" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         self.wantsPlayback = YES;
         self.seekHealth = [LCPlaybackHealth new];
         [self cancelPanSeek];
-        [NSUserDefaults.standardUserDefaults removeObjectForKey:self.progressKey];
+        if (!self.previewMode) [NSUserDefaults.standardUserDefaults removeObjectForKey:self.progressKey];
         if (!self.prepared) {
             if (!self.preparing) [self preparePlayback];
         } else {
@@ -1051,7 +1159,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 #if DEBUG
     NSLog(@"PLAYBACK_LIFECYCLE active pending=%d interrupted=%d", self.resumeAfterBackground, self.audioInterruptionActive);
 #endif
-    if (self.resumeAfterBackground && !self.audioInterruptionActive && !self.closed) { [self.player play]; [self applyPlaybackRate]; }
+    if (self.resumeAfterBackground && !self.audioInterruptionActive && !self.closed) [self resumeSynchronizedPlayback];
     if (self.audioInterruptionActive) return;
     self.resumeAfterBackground = NO;
 }
@@ -1078,8 +1186,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         if (resume) {
             if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive) {
                 [AVAudioSession.sharedInstance setActive:YES error:nil];
-                [self.player play];
-                [self applyPlaybackRate];
+                [self resumeSynchronizedPlayback];
             } else self.resumeAfterBackground = YES;
         }
     }
@@ -1100,24 +1207,23 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     [self.timer invalidate];
     self.timer = nil;
     self.player.delegate = nil;
-    [self.audioOutput shutdown];
     // VLCKit 3.7.2's -stop returns before native decoding callbacks finish.
     // Keep their targets alive and stop synchronously off the UI thread before
     // releasing the drawable. A quick dismissal/reopen must not free them early.
     VLCMediaPlayer *stoppingPlayer = self.player;
-    LCAudioOutput *stoppingAudio = self.audioOutput;
     UIView *stoppingSurface = self.videoSurface;
     dispatch_async(self.inputQueue, ^{
         libvlc_media_player_stop(stoppingPlayer.libVLCMediaPlayer);
         dispatch_async(dispatch_get_main_queue(), ^{
             stoppingPlayer.drawable = nil;
             [stoppingSurface removeFromSuperview];
-            [stoppingAudio shutdown];
+            if (self.stopped) { void (^completion)(void) = self.stopped; self.stopped = nil; completion(); }
         });
     });
     [NSNotificationCenter.defaultCenter removeObserver:self];
     UIApplication.sharedApplication.idleTimerDisabled = NO;
-    [[AVAudioSession sharedInstance] setActive:NO withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
+    // The native VLC audio output deactivates its session after stopping.
+    // Do not deactivate a new player's route while an old input is shutting down.
 }
 - (void)viewDidDisappear:(BOOL)animated {
     [super viewDidDisappear:animated];
@@ -1172,7 +1278,8 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     favorites.accessibilityIdentifier = @"favorites";
     UIBarButtonItem *sync = [[UIBarButtonItem alloc] initWithTitle:@"同步" style:UIBarButtonItemStylePlain target:self action:@selector(showSync)];
     sync.accessibilityIdentifier = @"showUserSync";
-    self.toolbarItems = @[[UIBarButtonItem flexibleSpaceItem], favorites, [UIBarButtonItem flexibleSpaceItem], history, [UIBarButtonItem flexibleSpaceItem], sync, [UIBarButtonItem flexibleSpaceItem]];
+    UIBarButtonItem *all = [[UIBarButtonItem alloc] initWithTitle:@"全部视频" style:UIBarButtonItemStylePlain target:self action:@selector(showAllVideos)]; all.accessibilityIdentifier = @"allVideos";
+    self.toolbarItems = @[[UIBarButtonItem flexibleSpaceItem], all, [UIBarButtonItem flexibleSpaceItem], favorites, [UIBarButtonItem flexibleSpaceItem], history, [UIBarButtonItem flexibleSpaceItem], sync, [UIBarButtonItem flexibleSpaceItem]];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(syncChanged:) name:LCUserSyncChanged object:nil];
     [self updateViewMenu];
     [self updateSortMenu];
@@ -1228,6 +1335,26 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     __weak typeof(self) owner = self;
     history.openItem = ^(NSDictionary *item) { [owner openFileItem:item]; };
     [self.navigationController pushViewController:history animated:YES];
+}
+- (void)showAllVideos {
+    LCVideoLibraryController *library = [[LCVideoLibraryController alloc] initWithStyle:UITableViewStylePlain];
+    library.host = [NSUserDefaults.standardUserDefaults stringForKey:HostKey] ?: @"";
+    library.library = [NSUserDefaults.standardUserDefaults stringForKey:@"libraryID"] ?: @"";
+    library.urlForEndpoint = ^NSURL *(NSString *endpoint, NSString *path) { return ServiceURL(endpoint, path); };
+    __weak typeof(self) owner = self;
+    library.openItem = ^(NSDictionary *item) { [owner openFileItem:item]; };
+    library.openFolder = ^(NSString *path) { [owner navigateToFolder:path title:path.length ? path.lastPathComponent : @"局域影院"]; };
+    library.previewItems = ^(NSArray *items) { [owner presentPreviewWithShuffle:[[LCVideoShuffle alloc] initWithItems:items]]; };
+    [self.navigationController pushViewController:library animated:YES];
+}
+- (void)presentPreviewWithShuffle:(LCVideoShuffle *)shuffle {
+    NSDictionary *item = [shuffle next]; if (!item) return;
+    PlayerController *player = [PlayerController new]; player.item = item; player.previewMode = YES;
+    __weak typeof(self) owner = self;
+    player.nextPreview = ^{ [owner presentPreviewWithShuffle:shuffle]; };
+    player.modalPresentationStyle = UIModalPresentationFullScreen;
+    UIViewController *presenter = self.navigationController.topViewController ?: self;
+    [presenter presentViewController:player animated:YES completion:nil];
 }
 - (void)showFavorites {
     LCFavoritesController *favorites = [[LCFavoritesController alloc] initWithStyle:UITableViewStylePlain];
