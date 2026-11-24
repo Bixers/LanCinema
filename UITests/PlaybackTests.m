@@ -656,6 +656,19 @@
     [self.app.buttons[@"打开所在文件夹"] tap];
     XCTAssertTrue([self.app.staticTexts[@"时间戳偏移测试.ts"] waitForExistenceWithTimeout:10]);
 }
+- (void)testDiscoveryAccessibleAppearance {
+    [self.app terminate]; self.app.launchArguments = @[@"--ui-test", @"--ui-test-dark", @"--ui-test-large", @"--ui-test-keep-controls"]; [self.app launch];
+    XCTAssertTrue([self.app.buttons[@"allVideos"] waitForExistenceWithTimeout:20]); [self.app.buttons[@"allVideos"] tap];
+    XCTAssertTrue([self.app.tables[@"allVideosList"].cells.firstMatch waitForExistenceWithTimeout:20]);
+    [self capture:@"all-videos-dark-large"];
+    [[self.app.navigationBars.buttons elementBoundByIndex:0] tap];
+    [self setAutomaticLandscape:NO]; [self openTransportStream]; [self openAudioCalibration];
+    [self capture:@"audio-calibration-dark-large-top"];
+    [self.app.tables.firstMatch swipeUp];
+    XCTAssertTrue(self.app.cells[@"resetAudioDelay"].isHittable);
+    [self capture:@"audio-calibration-dark-large-bottom"];
+    [self.app.buttons[@"完成"] tap]; [self closePlayback];
+}
 - (void)testExplorerAppearanceCaptures {
     XCTAssertTrue([self.app.staticTexts[@"演示文件夹"] waitForExistenceWithTimeout:20]);
     [self capture:@"explorer-details-portrait"];

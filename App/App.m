@@ -138,6 +138,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 @property(nonatomic) BOOL previewMode;
 @property(nonatomic) BOOL previewFinished;
 @property(nonatomic, copy) NSArray *previewClips;
+@property(nonatomic, copy) NSString *previewMethod;
 @property(nonatomic) NSUInteger previewIndex;
 @property(nonatomic, strong) UIStackView *previewBar;
 @property(nonatomic, strong) UIButton *segmentButton;
@@ -236,7 +237,8 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
                         if (isfinite(start) && isfinite(end) && start >= 0 && end > start && end-start <= 35) [clips addObject:clip];
                     }
                     if (!clips.count) { s.statusLabel.text = @"无法生成试看，可换一部或看全片"; return; }
-                    s.previewClips = clips; s.previewIndex = arc4random_uniform((uint32_t)clips.count);
+                    s.previewClips = clips; s.previewMethod = result[@"method"];
+                    s.previewIndex = [s.previewMethod isEqual:@"audio-activity"] ? 0 : arc4random_uniform((uint32_t)clips.count);
                     s.knownDuration = [result[@"duration"] doubleValue]; s.segmentButton.enabled = clips.count > 1;
                 }
                 s.indexedPlayback = !legacyDirect && [result[@"indexed"] boolValue];
@@ -249,6 +251,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
                 s.preparing = YES;
                 s.playButton.enabled = NO;
                 s.statusLabel.text = [result[@"state"] isEqual:@"waiting"] ? @"电脑正在准备其他视频，请稍候…" : @"正在准备视频\n首次打开可能稍久…";
+                if ([result[@"phase"] isEqual:@"analysis"]) s.statusLabel.text = @"电脑正在分析声音并选择片段…\n首次分析需要稍候，可换一部或看全片";
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ if (owner.preparationGeneration == generation) [owner preparePlayback]; });
             } else {
                 s.statusLabel.text = [result[@"error"] isKindOfClass:NSString.class] ? result[@"error"] : @"无法准备该视频";
@@ -744,6 +747,10 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         double span = MIN(120, MAX(30, duration * 0.2));
         double delta = [gesture translationInView:self.gestureSurface].x / MAX(1, self.gestureSurface.bounds.size.width) * span;
         self.panTargetTime = MIN(MAX(0, self.panStartTime + delta), MAX(0, duration - 0.25));
+        if (self.previewMode && self.previewClips.count) {
+            double start = [self.previewClips[self.previewIndex][@"start"] doubleValue];
+            self.panTargetTime = MIN(MAX(start, self.panTargetTime), MAX(start, [self.previewClips[self.previewIndex][@"end"] doubleValue]-.25));
+        }
         double difference = self.panTargetTime - self.panStartTime;
         self.seekLabel.text = [NSString stringWithFormat:@"%@ %.0f 秒\n%@ / %@", difference >= 0 ? @"快进" : @"后退", fabs(difference), ClockText(self.panTargetTime), ClockText(duration)];
         self.seekLabel.hidden = NO;
@@ -800,7 +807,10 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 - (void)restartPlaybackAt:(double)seconds {
     if (self.closed || self.stoppingInput || self.audioInterruptionActive) return;
     double target = MAX(0, seconds);
-    if (self.previewMode && self.previewClips.count) target = MIN(MAX(target, [self.previewClips[self.previewIndex][@"start"] doubleValue]), [self.previewClips[self.previewIndex][@"end"] doubleValue]-.25);
+    if (self.previewMode && self.previewClips.count) {
+        double start = [self.previewClips[self.previewIndex][@"start"] doubleValue];
+        target = MIN(MAX(target, start), MAX(start, [self.previewClips[self.previewIndex][@"end"] doubleValue]-.25));
+    }
     if ([self duration] > 0) target = MIN(target, MAX(0, [self duration] - .25));
     self.stoppingInput = YES;
     self.restartingPlayback = YES;
@@ -846,7 +856,8 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     double duration = [self duration];
     if (![self canSeek]) return;
     if (self.previewMode && self.previewClips.count) {
-        seconds = MIN(MAX(seconds, [self.previewClips[self.previewIndex][@"start"] doubleValue]), [self.previewClips[self.previewIndex][@"end"] doubleValue]-.25);
+        double start = [self.previewClips[self.previewIndex][@"start"] doubleValue];
+        seconds = MIN(MAX(seconds, start), MAX(start, [self.previewClips[self.previewIndex][@"end"] doubleValue]-.25));
         if (self.previewFinished) { self.previewFinished = NO; self.wantsPlayback = YES; [self restartPlaybackAt:seconds]; return; }
     }
     if (self.playbackEnded) { self.wantsPlayback = YES; [self restartPlaybackAt:seconds]; return; }
@@ -974,8 +985,15 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     self.gestureSurface.accessibilityValue = [NSString stringWithFormat:@"%@ / %@", ClockText([self currentPlaybackTime]), ClockText(duration)];
     if (!self.scrubbing && !self.panning) {
         double time = [self currentPlaybackTime];
+        self.slider.minimumValue = 0; self.slider.maximumValue = 1;
+        if (self.previewMode && self.previewClips.count && duration > 0) {
+            self.slider.minimumValue = [self.previewClips[self.previewIndex][@"start"] doubleValue]/duration;
+            self.slider.maximumValue = [self.previewClips[self.previewIndex][@"end"] doubleValue]/duration;
+        }
         self.slider.value = duration > 0 ? time / duration : self.player.position;
-        self.timeLabel.text = [NSString stringWithFormat:@"%@ / %@", ClockText(time), ClockText(duration)];
+        double start = self.previewMode && self.previewClips.count ? [self.previewClips[self.previewIndex][@"start"] doubleValue] : 0;
+        double end = self.previewMode && self.previewClips.count ? [self.previewClips[self.previewIndex][@"end"] doubleValue] : duration;
+        self.timeLabel.text = [NSString stringWithFormat:@"%@%@ / %@", self.previewMode ? @"试看 " : @"", ClockText(MAX(0, MIN(time, end)-start)), ClockText(end-start)];
     }
     [self.playButton setImage:[UIImage systemImageNamed:self.player.isPlaying ? @"pause.fill" : (self.playbackEnded ? @"arrow.counterclockwise" : @"play.fill")] forState:UIControlStateNormal];
     self.playButton.accessibilityLabel = self.player.isPlaying ? @"暂停" : (self.playbackEnded ? @"重新播放" : @"播放");
@@ -1084,6 +1102,9 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 - (void)showTracks {
     [self endBoost];
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"字幕与音轨" message:self.subtitleFallback ? @"该 TS 的内嵌字幕无法用于播放缓存，仍可选择外挂字幕。" : nil preferredStyle:UIAlertControllerStyleActionSheet];
+    if (self.previewMode && self.previewClips.count) {
+        sheet.message = [self.previewMethod isEqual:@"audio-activity"] ? [NSString stringWithFormat:@"本段声音活跃度：%.0f / 100\n评分综合持续音量与变化，不代表内容精彩程度。", [self.previewClips[self.previewIndex][@"score"] doubleValue]] : @"本段为按时长抽样；声音不足以评分，或分析未完成。";
+    }
     [sheet addAction:[UIAlertAction actionWithTitle:@"音画校准" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         LCAudioTimingController *panel = [LCAudioTimingController new];
         panel.scope = self.progressKey;
@@ -1092,7 +1113,11 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
             owner.player.currentAudioPlaybackDelay = milliseconds * 1000;
             [owner.diagnostics record:@"audio_delay" values:@{@"milliseconds":@(milliseconds)}];
         };
-        [self presentViewController:[[UINavigationController alloc] initWithRootViewController:panel] animated:YES completion:nil];
+        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:panel];
+        nav.view.tintColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits) {
+            return traits.userInterfaceStyle == UIUserInterfaceStyleDark ? UIColor.systemTealColor : [UIColor colorWithRed:0 green:.4 blue:.42 alpha:1];
+        }];
+        [self presentViewController:nav animated:YES completion:nil];
     }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"从头重新播放" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         self.wantsPlayback = YES;

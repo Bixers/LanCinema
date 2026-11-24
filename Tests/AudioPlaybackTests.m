@@ -89,19 +89,25 @@
     NSLog(@"AUDIO_OPEN app=%ld scene=%ld player=%ld prepared=%@ preparing=%@ pending_active=%@", (long)UIApplication.sharedApplication.applicationState, (long)self.window.windowScene.activationState, (long)controller.player.state, [controller valueForKey:@"prepared"], [controller valueForKey:@"preparing"], [controller valueForKey:@"resumeAfterBackground"]);
     return controller;
 }
-- (double)checkSound:(PlayerController *)controller label:(NSString *)label {
+- (double)checkPlaybackProgress:(PlayerController *)controller label:(NSString *)label {
     // Native VLC owns the AudioUnit and A/V clock. These checks verify audio
     // decoding and displayed video advance together, not physical lip-sync.
     // Hardware presentation requires the synchronized flash/tone fixture.
-    uint64_t initialAudio = controller.player.media.statistics.decodedAudio;
-    [self advanceRunLoop:3];
+    // An asynchronous reopen replaces media and resets its counters. Compare
+    // two samples of the new input, never a new decoder with the old totals.
+    [self advanceRunLoop:2];
+    VLCMedia *observed = controller.player.media;
+    uint64_t initialAudio = observed.statistics.decodedAudio;
+    uint64_t initialPictures = observed.statistics.displayedPictures;
+    [self advanceRunLoop:1];
     uint64_t audio = controller.player.media.statistics.decodedAudio;
     uint64_t pictures = controller.player.media.statistics.displayedPictures;
     NSLog(@"NATIVE_AV %@ audio=%llu pictures=%llu position=%.3f delay_us=%ld", label,
           audio, pictures, controller.player.time.intValue/1000.0,
           (long)controller.player.currentAudioPlaybackDelay);
     XCTAssertGreaterThan(audio, initialAudio, @"Audio decoding did not advance: %@", label);
-    XCTAssertGreaterThan(pictures, 0, @"No video frames displayed: %@", label);
+    XCTAssertEqual(controller.player.media, observed, @"Input changed during the observation: %@", label);
+    XCTAssertGreaterThan(pictures, initialPictures, @"Video frames did not advance: %@", label);
     XCTAssertGreaterThanOrEqual(controller.player.currentAudioTrackIndex, 0);
     XCTAssertTrue(controller.player.isPlaying);
     return 3;
@@ -113,31 +119,31 @@
 }
 - (void)testNativeAudioAndVideoAfterOpenSeekPauseAndResume {
     PlayerController *player = [self openAt:0];
-    double open = [self checkSound:player label:@"open"];
+    double open = [self checkPlaybackProgress:player label:@"open"];
     [player seekToTime:39];
-    double forward = [self checkSound:player label:@"forward"];
+    double forward = [self checkPlaybackProgress:player label:@"forward"];
     XCTAssertEqualWithAccuracy(player.player.time.intValue/1000.0, 41, 1.5);
     [player seekToTime:12];
-    double backward = [self checkSound:player label:@"backward"];
+    double backward = [self checkPlaybackProgress:player label:@"backward"];
     [player togglePlay];
     [self advanceRunLoop:.5];
     [player togglePlay];
-    double unpause = [self checkSound:player label:@"unpause"];
+    double unpause = [self checkPlaybackProgress:player label:@"unpause"];
     [player togglePlay];
     [self advanceRunLoop:.3];
     [player seekToTime:20];
     [self advanceRunLoop:.3];
     [player togglePlay];
-    double pausedSeek = [self checkSound:player label:@"paused-seek"];
+    double pausedSeek = [self checkPlaybackProgress:player label:@"paused-seek"];
     [player setValue:@2 forKey:@"selectedRate"];
     [player applyPlaybackRate];
-    double speed = [self checkSound:player label:@"double-speed"];
+    double speed = [self checkPlaybackProgress:player label:@"double-speed"];
     NSNotification *began = [NSNotification notificationWithName:AVAudioSessionInterruptionNotification object:nil userInfo:@{AVAudioSessionInterruptionTypeKey:@(AVAudioSessionInterruptionTypeBegan)}];
     NSNotification *ended = [NSNotification notificationWithName:AVAudioSessionInterruptionNotification object:nil userInfo:@{AVAudioSessionInterruptionTypeKey:@(AVAudioSessionInterruptionTypeEnded), AVAudioSessionInterruptionOptionKey:@(AVAudioSessionInterruptionOptionShouldResume)}];
     [player audioInterrupted:began]; [self advanceRunLoop:.3];
     XCTAssertFalse(player.player.isPlaying);
     [player audioInterrupted:ended];
-    [self checkSound:player label:@"interruption"];
+    [self checkPlaybackProgress:player label:@"interruption"];
     [player togglePlay]; [self advanceRunLoop:.3];
     [player audioInterrupted:began]; [player audioInterrupted:ended];
     [self advanceRunLoop:.3];
@@ -145,7 +151,7 @@
     XCTAssertFalse([[player valueForKey:@"wantsPlayback"] boolValue], @"The recovery watchdog must preserve the pause too");
     [self close:player];
     PlayerController *resumed = [self openAt:23];
-    double resume = [self checkSound:resumed label:@"resume"];
+    double resume = [self checkPlaybackProgress:resumed label:@"resume"];
     XCTAssertEqualWithAccuracy(resumed.player.time.intValue/1000.0, 25, 1.5);
     [self close:resumed];
     NSLog(@"NATIVE_AV observation_windows open=%.3f forward=%.3f backward=%.3f unpause=%.3f paused_seek=%.3f speed=%.3f resume=%.3f", open, forward, backward, unpause, pausedSeek, speed, resume);
@@ -164,7 +170,7 @@
     [player setValue:@"演示文件夹/中文字幕验证.srt" forKey:@"selectedExternalSubtitle"];
 
     [player seekToTime:12];
-    [self checkSound:player label:@"seek-after-end"];
+    [self checkPlaybackProgress:player label:@"seek-after-end"];
     XCTAssertEqualWithAccuracy(player.player.time.intValue / 1000.0, 14, 1.5);
     XCTAssertFalse([[player valueForKey:@"playbackEnded"] boolValue]);
     NSLog(@"REPLAY_SUBTITLE tracks=%@ selected=%d", player.player.videoSubTitlesNames, player.player.currentVideoSubTitleIndex);
@@ -175,7 +181,7 @@
     PlayerController *p = [self openAt:0]; [self advanceRunLoop:3];
 
     [p seekToTime:42]; [p seekToTime:8]; [p seekToTime:28];
-    [self checkSound:p label:@"rapid-latest-seek"];
+    [self checkPlaybackProgress:p label:@"rapid-latest-seek"];
     XCTAssertEqualWithAccuracy(p.player.time.intValue/1000.0, 30, 1.5);
     [p saveProgress];
     double confirmed = [NSUserDefaults.standardUserDefaults doubleForKey:p.progressKey];
@@ -206,11 +212,11 @@
     [self close:p];
 }
 - (void)testCalibrationReappliedAfterInputReplacement {
-    PlayerController *p = [self openAt:0]; [self checkSound:p label:@"calibration-open"];
+    PlayerController *p = [self openAt:0]; [self checkPlaybackProgress:p label:@"calibration-open"];
     LCSetAudioDelayMilliseconds(p.progressKey, 150);
-    [p restartPlaybackAt:20]; [self checkSound:p label:@"calibration-reopen"];
+    [p restartPlaybackAt:20]; [self checkPlaybackProgress:p label:@"calibration-reopen"];
     XCTAssertEqual(p.player.currentAudioPlaybackDelay, 150000);
-    [p seekToTime:10]; [self checkSound:p label:@"calibration-seek"];
+    [p seekToTime:10]; [self checkPlaybackProgress:p label:@"calibration-seek"];
     XCTAssertEqual(p.player.currentAudioPlaybackDelay, 150000);
     LCSetAudioDelayMilliseconds(p.progressKey, 0); [self close:p];
 }
@@ -222,7 +228,7 @@
     XCTAssertTrue(p.player.isPlaying);
     NSArray *clips = [p valueForKey:@"previewClips"]; XCTAssertGreaterThan(clips.count, 1);
     NSUInteger first = [[p valueForKey:@"previewIndex"] unsignedIntegerValue];
-    [p changePreviewSegment]; [self checkSound:p label:@"preview-change-segment"];
+    [p changePreviewSegment]; [self checkPlaybackProgress:p label:@"preview-change-segment"];
     NSUInteger second = [[p valueForKey:@"previewIndex"] unsignedIntegerValue]; XCTAssertNotEqual(first, second);
     double end = [clips[second][@"end"] doubleValue];
     [p seekToTime:end-.8]; [self advanceRunLoop:4];
@@ -230,12 +236,12 @@
     XCTAssertLessThan(p.player.time.intValue/1000., end+1);
     [p saveProgress];
     XCTAssertEqualWithAccuracy([LCPlaybackHistory.shared positionForItem:item host:@"127.0.0.1" library:library], 7, .01);
-    [p changePreviewSegment]; [self checkSound:p label:@"preview-another-segment"];
+    [p changePreviewSegment]; [self checkPlaybackProgress:p label:@"preview-another-segment"];
     VLCMedia *input = p.player.media;
     [p watchFullVideo];
     XCTAssertEqual(p.player.media, input, @"Watching full video should retain the running input and clock");
     XCTAssertFalse([[p valueForKey:@"previewMode"] boolValue]);
-    [self checkSound:p label:@"preview-to-full"]; [p saveProgress];
+    [self checkPlaybackProgress:p label:@"preview-to-full"]; [p saveProgress];
     XCTAssertGreaterThan([LCPlaybackHistory.shared positionForItem:item host:@"127.0.0.1" library:library], 7);
     [self close:p];
 }

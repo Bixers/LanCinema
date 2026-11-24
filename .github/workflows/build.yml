@@ -209,6 +209,7 @@ jobs:
             TEST_SELECTION=(
               '-only-testing:LanCinemaUITests/PlaybackTests/testAudioCalibrationPersistenceAndAppearance'
               '-only-testing:LanCinemaUITests/PlaybackTests/testAllVideosSearchHistoryFolderAndPreview'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testDiscoveryAccessibleAppearance'
               '-only-testing:LanCinemaUITests/PlaybackTests/testTransportStreamDurationSeekingAndResume'
               '-only-testing:LanCinemaUITests/PlaybackTests/testSeekAndReplayAfterVideoEnds'
               '-only-testing:LanCinemaUITests/PlaybackTests/testHorizontalCanvasSeekingWithoutGestureConflicts'

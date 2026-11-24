@@ -4,6 +4,11 @@
 #import "PlaybackHistory.h"
 #import "Connection.h"
 
+static NSString *VideoLibraryTime(double seconds) {
+    NSInteger value = MAX(0, (NSInteger)seconds);
+    return [NSString stringWithFormat:@"%02ld:%02ld", (long)value/60, (long)value%60];
+}
+
 NSArray<NSDictionary *> *LCFilterVideoItems(NSArray<NSDictionary *> *items, NSString *query) {
     NSArray *words = [[query precomposedStringWithCompatibilityMapping] componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     return [items filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *item, NSDictionary *bindings) {
@@ -167,7 +172,7 @@ NSArray<NSDictionary *> *LCFilterVideoItems(NSArray<NSDictionary *> *items, NSSt
     for (UIView *v in cell.contentView.subviews) [v removeFromSuperview];
     NSDictionary *item = self.visible[indexPath.row], *record = self.progress[item[@"path"]];
     NSString *extra = [@"位置：" stringByAppendingString:[item[@"path"] stringByDeletingLastPathComponent]];
-    if (record) extra = [NSString stringWithFormat:@"已看 %.0f / %.0f 分钟\n%@", [record[@"position"] doubleValue]/60, [record[@"duration"] doubleValue]/60, extra];
+    if (record) extra = [NSString stringWithFormat:@"已看 %@ / %@\n%@", VideoLibraryTime([record[@"position"] doubleValue]), VideoLibraryTime([record[@"duration"] doubleValue]), extra];
     UIView *entry = LCFileEntry(item, extra, YES, NO, self.traitCollection, self.urlForEndpoint(@"/api/thumbnail", item[@"path"]), self.library);
     entry.translatesAutoresizingMaskIntoConstraints = NO; [cell.contentView addSubview:entry];
     [NSLayoutConstraint activateConstraints:@[[entry.leadingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.leadingAnchor], [entry.trailingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.trailingAnchor],

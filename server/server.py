@@ -226,7 +226,7 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.server.playback_cache.prepare(path) if indexed else {'state': 'ready'}
                 if route.path == '/api/preview' and result.get('state') == 'ready':
                     source = self.server.playback_cache.ready_path(path) if indexed else path
-                    preview = self.server.preview_cache.prepare(source) if source else {'state': 'preparing'}
+                    preview = self.server.preview_cache.prepare(source, identity=path) if source else {'state': 'preparing'}
                     result = dict(result, **preview)
                 return self.reply(200, json.dumps(dict(result, indexed=indexed), ensure_ascii=False).encode())
             if route.path == '/api/crop':
