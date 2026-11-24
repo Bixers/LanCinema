@@ -632,10 +632,12 @@
 - (void)testAllVideosSearchHistoryFolderAndPreview {
     XCTAssertTrue([self.app.buttons[@"allVideos"] waitForExistenceWithTimeout:20]); [self.app.buttons[@"allVideos"] tap];
     XCTAssertTrue([self.app.tables[@"allVideosList"].cells.firstMatch waitForExistenceWithTimeout:20]);
+    [self waitForMonochromeFixtureCover:self.app.tables[@"allVideosList"].cells.firstMatch];
     [self capture:@"all-videos-large-covers"];
     XCUIElement *search = self.app.searchFields.firstMatch;
     [search tap]; [search typeText:@"演示文件夹 时间戳\n"];
     XCTAssertEqual(self.app.tables[@"allVideosList"].cells.count, 1);
+    [self assertThumbnailPixels:self.app.tables[@"allVideosList"].cells.firstMatch];
     [self capture:@"all-videos-path-keywords"];
     [self.app.buttons[@"搜索历史"] tap]; XCTAssertTrue(self.app.buttons[@"演示文件夹 时间戳"].exists);
     [self.app.buttons[@"取消"] tap];
@@ -645,6 +647,9 @@
     [self expectationForPredicate:enabled evaluatedWithObject:self.app.buttons[@"changePreviewSegment"] handler:nil];
     [self waitForExpectationsWithTimeout:20 handler:nil];
     [self.app.buttons[@"changePreviewSegment"] tap];
+    [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)] tap];
+    [self assertVideoFramesAdvance:@"random-preview-decoded-frames"];
+    [self showPlayerControls];
     [self capture:@"random-preview-controls"];
     [self.app.buttons[@"changePreviewVideo"] tap];
     XCTAssertTrue([self.app.buttons[@"watchFullVideo"] waitForExistenceWithTimeout:15]);
@@ -656,6 +661,28 @@
     [self.app.tables[@"allVideosList"].cells.firstMatch pressForDuration:1];
     [self.app.buttons[@"打开所在文件夹"] tap];
     XCTAssertTrue([self.app.staticTexts[@"时间戳偏移测试.ts"] waitForExistenceWithTimeout:10]);
+}
+- (void)waitForMonochromeFixtureCover:(XCUIElement *)cell {
+    // The alphabetically first synthetic fixture has a black portrait frame
+    // with a gray center. The loading symbol is teal on a white list background.
+    BOOL loaded = NO;
+    for (NSInteger attempt=0; attempt<15 && !loaded; attempt++) {
+        CGImageRef source = cell.screenshot.image.CGImage; CGFloat width = CGImageGetWidth(source);
+        CGImageRef crop = CGImageCreateWithImageInRect(source, CGRectMake(width*.15, width*.12, width*.7, width*.3));
+        unsigned char pixels[32*32*4] = {0}; CGColorSpaceRef colors = CGColorSpaceCreateDeviceRGB();
+        CGContextRef context = CGBitmapContextCreate(pixels, 32, 32, 8, 32*4, colors, kCGImageAlphaPremultipliedLast);
+        CGContextDrawImage(context, CGRectMake(0,0,32,32), crop);
+        NSUInteger dark = 0;
+        for (NSUInteger i=0;i<32*32;i++) if (MAX(pixels[i*4], MAX(pixels[i*4+1],pixels[i*4+2])) < 70) dark++;
+        loaded = dark > 32*32*.15;
+        CGContextRelease(context); CGColorSpaceRelease(colors); CGImageRelease(crop);
+        if (!loaded) {
+            XCTestExpectation *wait = [self expectationWithDescription:@"Real fixture cover loads"];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [wait fulfill]; });
+            [self waitForExpectationsWithTimeout:3 handler:nil];
+        }
+    }
+    XCTAssertTrue(loaded, @"Capture must contain the actual fixture frame");
 }
 - (void)testDiscoveryAccessibleAppearance {
     [self.app terminate]; self.app.launchArguments = @[@"--ui-test", @"--ui-test-dark", @"--ui-test-large", @"--ui-test-keep-controls"]; [self.app launch];

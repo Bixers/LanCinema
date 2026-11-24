@@ -14,6 +14,10 @@ on:
         description: 'Validate global library, random previews, audio calibration and playback'
         type: boolean
         default: false
+      discovery_captures:
+        description: 'Recapture settled library, preview and calibration appearances'
+        type: boolean
+        default: false
       favorites:
         description: 'Validate favorites, browser, history and all unit/audio tests'
         type: boolean
@@ -205,7 +209,13 @@ jobs:
           PY
           set -o pipefail
           TEST_SELECTION=()
-          if [ '${{ inputs.discovery }}' = 'true' ]; then
+          if [ '${{ inputs.discovery_captures }}' = 'true' ]; then
+            TEST_SELECTION=(
+              '-only-testing:LanCinemaUITests/PlaybackTests/testAudioCalibrationPersistenceAndAppearance'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testAllVideosSearchHistoryFolderAndPreview'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testDiscoveryAccessibleAppearance'
+            )
+          elif [ '${{ inputs.discovery }}' = 'true' ]; then
             TEST_SELECTION=(
               '-only-testing:LanCinemaUITests/PlaybackTests/testAudioCalibrationPersistenceAndAppearance'
               '-only-testing:LanCinemaUITests/PlaybackTests/testAllVideosSearchHistoryFolderAndPreview'
