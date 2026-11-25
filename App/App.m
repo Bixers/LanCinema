@@ -188,6 +188,9 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     // presentation timestamps without recreating the device on seek/rate changes.
     [media addOption:@":network-caching=300"];
     [media addOption:@":audio-time-stretch"];
+    // VLC initializes audio-delay from this millisecond option before the
+    // first PCM callback. Apply calibration before anchoring the output clock.
+    [media addOption:[NSString stringWithFormat:@":audio-desync=%ld", (long)LCAudioDelayMilliseconds(self.progressKey)]];
     // Select the resume point before input/audio output start. Starting at zero
     // and seeking from tick interrupted the first audio and buffered twice.
     self.restored = YES;
@@ -1125,8 +1128,10 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         panel.scope = self.progressKey;
         __weak typeof(self) owner = self;
         panel.changed = ^(NSInteger milliseconds) {
-            owner.player.currentAudioPlaybackDelay = milliseconds * 1000;
             [owner.diagnostics record:@"audio_delay" values:@{@"milliseconds":@(milliseconds)}];
+            // An explicit calibration change needs a fresh timestamp anchor.
+            // Ordinary seeks, holds and pause/resume retain the running output.
+            [owner restartPlaybackAt:[owner currentPlaybackTime]];
         };
         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:panel];
         nav.view.tintColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits) {
