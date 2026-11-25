@@ -14,6 +14,10 @@ on:
         description: 'Validate global library, random previews, audio calibration and playback'
         type: boolean
         default: false
+      audio_continuity:
+        description: 'Validate rendered audio across seeks, hold/release, pauses, and preview playback'
+        type: boolean
+        default: false
       discovery_captures:
         description: 'Recapture settled library, preview and calibration appearances'
         type: boolean
@@ -209,7 +213,15 @@ jobs:
           PY
           set -o pipefail
           TEST_SELECTION=()
-          if [ '${{ inputs.discovery_captures }}' = 'true' ]; then
+          if [ '${{ inputs.audio_continuity }}' = 'true' ]; then
+            TEST_SELECTION=(
+              '-only-testing:LanCinemaUITests/PlaybackTests/testAllVideosSearchHistoryFolderAndPreview'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testAudioCalibrationPersistenceAndAppearance'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testTransportStreamDurationSeekingAndResume'
+              '-only-testing:LanCinemaUITests/PlaybackTests/testHorizontalCanvasSeekingWithoutGestureConflicts'
+              '-only-testing:LanCinemaTests'
+            )
+          elif [ '${{ inputs.discovery_captures }}' = 'true' ]; then
             TEST_SELECTION=(
               '-only-testing:LanCinemaUITests/PlaybackTests/testAudioCalibrationPersistenceAndAppearance'
               '-only-testing:LanCinemaUITests/PlaybackTests/testAllVideosSearchHistoryFolderAndPreview'

@@ -3,6 +3,7 @@
 #import <MobileVLCKit/MobileVLCKit.h>
 #import <math.h>
 #import "Connection.h"
+#import "AudioOutput.h"
 #import "PlaybackTiming.h"
 #import "VideoLibrary.h"
 #import "FileSort.h"
@@ -69,6 +70,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
 @property(nonatomic) BOOL prepared;
 @property(nonatomic) BOOL indexedPlayback;
 @property(nonatomic, strong) VLCMediaPlayer *player;
+@property(nonatomic, strong) LCAudioOutput *audioOutput;
 @property(nonatomic, strong) UIView *canvas;
 @property(nonatomic, strong) UIView *videoSurface;
 @property(nonatomic, strong) UIButton *fitButton;
@@ -180,10 +182,11 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     return url;
 }
 - (VLCMedia *)playbackMediaStartingAt:(double)position {
+    [self.audioOutput reset];
     VLCMedia *media = [VLCMedia mediaWithURL:[self playbackURL]];
-    // Let VLC's native AudioUnit output report actual device latency to the
-    // same clock used for video. Prefer synchronized startup over minimum wait.
-    [media addOption:@":network-caching=1200"];
+    // Keep a small LAN jitter buffer. The persistent PCM output follows VLC's
+    // presentation timestamps without recreating the device on seek/rate changes.
+    [media addOption:@":network-caching=300"];
     [media addOption:@":audio-time-stretch"];
     // Select the resume point before input/audio output start. Starting at zero
     // and seeking from tick interrupted the first audio and buffered twice.
@@ -475,8 +478,7 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     self.player.delegate = self;
     self.player.drawable = self.videoSurface;
     self.player.scaleFactor = 0;
-    // Do not install amem callbacks: a separate AVAudioEngine cannot report
-    // its output delay back to VLC's clock and may drift after seeks/pauses.
+    self.audioOutput = [[LCAudioOutput alloc] initWithPlayer:self.player];
     // Search results can live below the browser's current folder. Load subtitles beside this video.
     NSString *parent = [self.item[@"path"] stringByDeletingLastPathComponent];
     __weak typeof(self) subtitleOwner = self;
@@ -793,10 +795,10 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     }
 }
 - (void)resumeSynchronizedPlayback {
-    // Native AudioUnit pause flushes queued PCM. Reopen at the paused position
-    // so both decoders refill together instead of skipping that audio on resume.
-    if (self.prepared && !self.stoppingInput) [self restartPlaybackAt:[self currentPlaybackTime]];
-    else { [self.player play]; [self applyPlaybackRate]; }
+    // The persistent output pauses its node without discarding queued PCM.
+    // Ordinary resume must retain the input instead of buffering it again.
+    [self.player play];
+    [self applyPlaybackRate];
 }
 - (double)duration {
     double measured = self.player.media.length.intValue / 1000.0;
@@ -904,10 +906,11 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
         @"decodedAudio":@(self.player.media.statistics.decodedAudio), @"decodedVideo":@(self.player.media.statistics.decodedVideo),
         @"lostPictures":@(self.player.media.statistics.lostPictures), @"seekable":@(self.player.isSeekable),
         @"seekPending":@(self.seekHealth.pending), @"rate":@(self.player.rate), @"indexedTS":@([self isTransportStream]),
-        @"recoveryFailed":@(self.recoveryFailed), @"nativeAudioOutput":@YES,
+        @"recoveryFailed":@(self.recoveryFailed), @"nativeAudioOutput":@(self.audioOutput == nil),
+        @"persistentPCMOutput":@(self.audioOutput != nil),
         @"deviceOutputLatencyMilliseconds":@(AVAudioSession.sharedInstance.outputLatency*1000),
         @"preview":@(self.previewMode),
-        @"networkCacheMilliseconds":@1200, @"audioDelayMicroseconds":@(self.player.currentAudioPlaybackDelay)}];
+        @"networkCacheMilliseconds":@300, @"audioDelayMicroseconds":@(self.player.currentAudioPlaybackDelay)}];
 }
 - (void)showDiagnostics {
     [self endBoost]; self.controlsTouched = NSDate.timeIntervalSinceReferenceDate;
@@ -1026,7 +1029,8 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
                 self.statusLabel.text = @"";
                 self.statusLabel.hidden = NO;
                 [self applyPlaybackRate];
-                self.player.currentAudioPlaybackDelay = LCAudioDelayMilliseconds(self.progressKey) * 1000;
+                NSInteger delay = LCAudioDelayMilliseconds(self.progressKey) * 1000;
+                if (self.player.currentAudioPlaybackDelay != delay) self.player.currentAudioPlaybackDelay = delay;
                 break;
             case VLCMediaPlayerStateOpening: self.statusLabel.hidden = NO; self.statusLabel.text = @"正在打开视频…"; break;
             case VLCMediaPlayerStateBuffering: self.statusLabel.hidden = NO; self.statusLabel.text = @"正在缓冲…"; break;
@@ -1244,13 +1248,17 @@ static UIButton *SymbolButton(NSString *symbol, NSString *label, id target, SEL 
     [self.timer invalidate];
     self.timer = nil;
     self.player.delegate = nil;
+    [self.audioOutput shutdown];
     // VLCKit 3.7.2's -stop returns before native decoding callbacks finish.
     // Keep their targets alive and stop synchronously off the UI thread before
     // releasing the drawable. A quick dismissal/reopen must not free them early.
     VLCMediaPlayer *stoppingPlayer = self.player;
+    LCAudioOutput *stoppingAudio = self.audioOutput;
     UIView *stoppingSurface = self.videoSurface;
     dispatch_async(self.inputQueue, ^{
         libvlc_media_player_stop(stoppingPlayer.libVLCMediaPlayer);
+        // Keep the callback target alive until all native callbacks have ended.
+        [stoppingAudio shutdown];
         dispatch_async(dispatch_get_main_queue(), ^{
             stoppingPlayer.drawable = nil;
             [stoppingSurface removeFromSuperview];

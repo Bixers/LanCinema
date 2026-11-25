@@ -3,6 +3,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import <MobileVLCKit/MobileVLCKit.h>
 #import "../App/Connection.h"
+#import "../App/AudioOutput.h"
 #import "../App/PlaybackTiming.h"
 #import "../App/PlaybackHistory.h"
 #import "../App/PlaybackHealth.h"
@@ -10,6 +11,7 @@
 @interface PlayerController : UIViewController
 @property(nonatomic, copy) NSDictionary *item;
 @property(nonatomic, strong) VLCMediaPlayer *player;
+@property(nonatomic, strong) LCAudioOutput *audioOutput;
 - (NSString *)progressKey;
 - (void)seekToTime:(double)seconds;
 - (void)togglePlay;
@@ -23,6 +25,14 @@
 - (double)currentPlaybackTime;
 - (void)changePreviewSegment;
 - (void)watchFullVideo;
+- (void)hold:(UILongPressGestureRecognizer *)gesture;
+@end
+
+@interface LCTestHoldGesture : UILongPressGestureRecognizer
+@property(nonatomic) UIGestureRecognizerState simulatedState;
+@end
+@implementation LCTestHoldGesture
+- (UIGestureRecognizerState)state { return self.simulatedState; }
 @end
 
 @interface AudioPlaybackTests : XCTestCase
@@ -84,6 +94,9 @@
         [NSUserDefaults.standardUserDefaults setDouble:position forKey:controller.progressKey];
     }
     controller.modalPresentationStyle = UIModalPresentationFullScreen;
+    [controller loadViewIfNeeded];
+    XCTAssertNotNil(controller.audioOutput);
+    [controller.audioOutput beginRenderProbe];
     XCTestExpectation *presented = [self expectationWithDescription:@"Player presentation finished"];
     [self.window.rootViewController presentViewController:controller animated:NO completion:^{ [presented fulfill]; }];
     [self waitForExpectationsWithTimeout:5 handler:nil];
@@ -92,15 +105,15 @@
     return controller;
 }
 - (double)checkPlaybackProgress:(PlayerController *)controller label:(NSString *)label {
-    // Native VLC owns the AudioUnit and A/V clock. These checks verify audio
-    // decoding and displayed video advance together, not physical lip-sync.
-    // Hardware presentation requires the synchronized flash/tone fixture.
+    // Keep the video/counter check alongside the downstream mixer probe.
+    // Neither check measures physical speaker/Bluetooth lip-sync.
     // An asynchronous reopen replaces media and resets its counters. Compare
     // two samples of the new input, never a new decoder with the old totals.
     [self advanceRunLoop:2];
     VLCMedia *observed = controller.player.media;
     uint64_t initialAudio = observed.statistics.decodedAudio;
     uint64_t initialPictures = observed.statistics.displayedPictures;
+    NSUInteger initialRendered = controller.audioOutput.renderedNonSilentBuffers;
     [self advanceRunLoop:1];
     uint64_t audio = controller.player.media.statistics.decodedAudio;
     uint64_t pictures = controller.player.media.statistics.displayedPictures;
@@ -110,9 +123,49 @@
     XCTAssertGreaterThan(audio, initialAudio, @"Audio decoding did not advance: %@", label);
     XCTAssertEqual(controller.player.media, observed, @"Input changed during the observation: %@", label);
     XCTAssertGreaterThan(pictures, initialPictures, @"Video frames did not advance: %@", label);
+    XCTAssertGreaterThan(controller.audioOutput.renderedNonSilentBuffers, initialRendered, @"Output mixer stayed silent: %@", label);
     XCTAssertGreaterThanOrEqual(controller.player.currentAudioTrackIndex, 0);
     XCTAssertTrue(controller.player.isPlaying);
     return 3;
+}
+- (void)checkRenderedSound:(PlayerController *)controller label:(NSString *)label {
+    // Observe the real AVAudioEngine mixer, not merely decoder counters.
+    [self advanceRunLoop:2];
+    double first = controller.audioOutput.renderProbeDelay;
+    double gap = controller.audioOutput.renderProbeLongestGap;
+    NSUInteger count = controller.audioOutput.renderedNonSilentBuffers;
+    NSLog(@"AUDIO_RENDER %@ first_non_silent=%.3f longest_gap=%.3f buffers=%lu", label, first, gap, (unsigned long)count);
+    XCTAssertGreaterThanOrEqual(first, 0, @"Mixer stayed silent: %@", label);
+    XCTAssertLessThan(first, 1., @"Output recovery exceeded one second: %@", label);
+    XCTAssertLessThan(gap, 1., @"Output silence exceeded one second: %@", label);
+    XCTAssertGreaterThan(count, 5);
+}
+- (void)testRenderedAudioContinuityThroughOpenSeekHoldAndResume {
+    PlayerController *p = [self openAt:0];
+    [self checkRenderedSound:p label:@"open"];
+    [p.audioOutput beginRenderProbe]; [p seekToTime:32];
+    [self checkRenderedSound:p label:@"seek-forward"];
+    [p.audioOutput beginRenderProbe]; [p seekToTime:10];
+    [self checkRenderedSound:p label:@"seek-backward"];
+    VLCMedia *input = p.player.media;
+    LCTestHoldGesture *hold = [LCTestHoldGesture new];
+    for (NSInteger cycle=0; cycle<3; cycle++) {
+        [p setValue:@(cycle == 1 ? 3 : 2) forKey:@"holdRate"];
+        [p.audioOutput beginRenderProbe]; hold.simulatedState = UIGestureRecognizerStateBegan; [p hold:hold];
+        XCTAssertTrue([[p valueForKey:@"boosting"] boolValue]);
+        [self checkRenderedSound:p label:[NSString stringWithFormat:@"hold-%ld", (long)cycle]];
+        [p.audioOutput beginRenderProbe]; hold.simulatedState = UIGestureRecognizerStateEnded; [p hold:hold];
+        [self checkRenderedSound:p label:[NSString stringWithFormat:@"release-%ld", (long)cycle]];
+        XCTAssertEqualWithAccuracy(p.player.rate, 1, .01);
+        XCTAssertEqual(p.player.media, input);
+    }
+    [p togglePlay]; [self advanceRunLoop:.3];
+    [p.audioOutput beginRenderProbe]; [p togglePlay];
+    [self checkRenderedSound:p label:@"resume-without-reopen"];
+    XCTAssertEqual(p.player.media, input);
+    [self close:p];
+    p = [self openAt:20]; [self checkRenderedSound:p label:@"saved-position"];
+    [self close:p];
 }
 - (void)close:(PlayerController *)controller {
     [controller stopPlayer];
