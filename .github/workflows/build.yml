@@ -18,6 +18,10 @@ on:
         description: 'Validate rendered audio across seeks, hold/release, pauses, and preview playback'
         type: boolean
         default: false
+      preview_recheck:
+        description: 'Recheck library preview journey after rotation settles'
+        type: boolean
+        default: false
       discovery_captures:
         description: 'Recapture settled library, preview and calibration appearances'
         type: boolean
@@ -213,7 +217,9 @@ jobs:
           PY
           set -o pipefail
           TEST_SELECTION=()
-          if [ '${{ inputs.audio_continuity }}' = 'true' ]; then
+          if [ '${{ inputs.preview_recheck }}' = 'true' ]; then
+            TEST_SELECTION=('-only-testing:LanCinemaUITests/PlaybackTests/testAllVideosSearchHistoryFolderAndPreview')
+          elif [ '${{ inputs.audio_continuity }}' = 'true' ]; then
             TEST_SELECTION=(
               '-only-testing:LanCinemaUITests/PlaybackTests/testAllVideosSearchHistoryFolderAndPreview'
               '-only-testing:LanCinemaUITests/PlaybackTests/testAudioCalibrationPersistenceAndAppearance'

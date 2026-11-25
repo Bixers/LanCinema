@@ -649,7 +649,11 @@
     XCTAssertTrue([self.app.buttons[@"changePreviewSegment"] waitForExistenceWithTimeout:10]);
     NSPredicate *enabled = [NSPredicate predicateWithFormat:@"enabled == YES"];
     [self expectationForPredicate:enabled evaluatedWithObject:self.app.buttons[@"changePreviewSegment"] handler:nil];
-    [self waitForExpectationsWithTimeout:20 handler:nil];
+    // The server bounds first-time audio analysis at 45 seconds. Hosted
+    // simulators may also still be completing automatic landscape rotation.
+    [self waitForExpectationsWithTimeout:60 handler:nil];
+    [self waitForLandscape:YES];
+    [self waitForRotationCompositor];
     [self.app.buttons[@"changePreviewSegment"] tap];
     [[self.app coordinateWithNormalizedOffset:CGVectorMake(.5,.5)] tap];
     [self assertVideoFramesAdvance:@"random-preview-decoded-frames"];
